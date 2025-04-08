@@ -4,15 +4,14 @@ import {
     Box,
     Typography,
     Button,
-    Switch,
-    FormControlLabel,
     Paper,
     Divider,
     CircularProgress,
 } from '@mui/material';
 
+import logo from '../assets/logo-horizontal-texto-preto.png'; 
+
 function BotInterface() {
-    const [testMode, setTestMode] = useState(true);
     const [logs, setLogs] = useState([]);
     const [isBotRunning, setIsBotRunning] = useState(false);
     const [qrCode, setQrCode] = useState(null);
@@ -28,7 +27,6 @@ function BotInterface() {
         try {
             const response = await axios.get(`${API_URL}/status`);
             setIsBotRunning(response.data.running);
-            setTestMode(response.data.testMode);
         } catch (error) {
             console.error('Erro ao verificar status:', error);
             setLogs((prevLogs) => [...prevLogs, `Erro ao verificar status: ${error.message}`]);
@@ -54,6 +52,12 @@ function BotInterface() {
                             setLogs((prevLogs) => [...prevLogs, 'QR Code recebido']);
                         } else {
                             setLogs((prevLogs) => [...prevLogs, data.message]);
+                            if (data.message.includes('Bot parado')) {
+                                setIsBotRunning(false);
+                                setQrCode(null);
+                            } else if (data.message.includes('Conectado ao WhatsApp')) {
+                                setIsBotRunning(true);
+                            }
                         }
                     }
                 } catch (error) {
@@ -97,29 +101,31 @@ function BotInterface() {
     const handleStartBot = async () => {
         setIsStarting(true);
         try {
-            const response = await axios.post(`${API_URL}/start-bot`, { testMode });
-            setIsBotRunning(true);
+            const response = await axios.post(`${API_URL}/start-bot`);
             setLogs((prevLogs) => [...prevLogs, 'Bot iniciado com sucesso']);
         } catch (error) {
             console.error('Erro ao iniciar o bot:', error);
             setLogs((prevLogs) => [...prevLogs, `Erro ao iniciar o bot: ${error.response?.data?.message || error.message}`]);
         } finally {
             setIsStarting(false);
+            fetchStatus();
         }
     };
 
     const handleStopBot = async () => {
+        if (isStopping) return;
         setIsStopping(true);
         try {
             const response = await axios.post(`${API_URL}/stop-bot`);
-            setIsBotRunning(false);
-            setQrCode(null);
             setLogs((prevLogs) => [...prevLogs, 'Bot parado com sucesso']);
         } catch (error) {
             console.error('Erro ao parar o bot:', error);
             setLogs((prevLogs) => [...prevLogs, `Erro ao parar o bot: ${error.response?.data?.message || error.message}`]);
         } finally {
-            setIsStopping(false);
+            setTimeout(() => {
+                setIsStopping(false);
+                fetchStatus();
+            }, 1000);
         }
     };
 
@@ -132,7 +138,6 @@ function BotInterface() {
         setIsClearing(true);
         try {
             const response = await axios.post(`${API_URL}/clear-session`);
-            setIsBotRunning(false);
             setQrCode(null);
             setLogs((prevLogs) => [...prevLogs, response.data.message]);
         } catch (error) {
@@ -140,6 +145,7 @@ function BotInterface() {
             setLogs((prevLogs) => [...prevLogs, `Erro ao limpar sessão: ${error.response?.data?.message || error.message}`]);
         } finally {
             setIsClearing(false);
+            fetchStatus();
         }
     };
 
@@ -151,23 +157,26 @@ function BotInterface() {
     return (
         <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h4">WhatsApp Bot</Typography>
-                <Button variant="contained" color="error" onClick={handleLogout}>
+                <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                    <img
+                        src={logo}
+                        alt="Projeto Desenvolve Logo"
+                        style={{
+                            maxWidth: '220px',
+                            height: 'auto',
+                        }}
+                    />
+                </Box>
+                <Button
+                    variant="contained"
+                    color="error"
+                    onClick={handleLogout}
+                >
                     Sair
                 </Button>
             </Box>
 
             <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'center' }}>
-                <FormControlLabel
-                    control={
-                        <Switch
-                            checked={testMode}
-                            onChange={(e) => setTestMode(e.target.checked)}
-                            disabled={isBotRunning || isStarting || isStopping || isClearing}
-                        />
-                    }
-                    label="Modo de Teste"
-                />
                 <Button
                     variant="contained"
                     color="primary"
@@ -188,6 +197,7 @@ function BotInterface() {
                 </Button>
                 <Button
                     variant="outlined"
+                    color="#00000"
                     onClick={handleClearLogs}
                     disabled={isBotRunning || isStarting || isStopping || isClearing}
                 >
@@ -195,7 +205,7 @@ function BotInterface() {
                 </Button>
                 <Button
                     variant="outlined"
-                    color="warning"
+                    color="#00000"
                     onClick={handleClearSession}
                     disabled={isStarting || isStopping || isClearing}
                     startIcon={isClearing ? <CircularProgress size={20} /> : null}

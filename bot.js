@@ -2,10 +2,17 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const {
+    makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    Browsers,
+    fetchLatestBaileysVersion
+} = require("@whiskeysockets/baileys");
 const qrcode = require('qrcode');
 const { fetchEnrolled } = require('./services/api');
 const fs = require('fs').promises;
+const P = require('pino');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -14,10 +21,10 @@ app.use(cors());
 app.use(express.json());
 
 let botRunning = false;
-let testMode = true;
 let wssClients = [];
 let sock = null;
 let isRunning = false;
+let stopSignal = null;
 
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
@@ -45,269 +52,272 @@ const sendLog = (message) => {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function startBot(sender, TEST_MODE) {
+async function startBot(sender) {
     if (isRunning) {
-        sender.send('log', 'Bot já está em execução!');
+        sender.send('log', '⚠️ Bot já está em execução...');
         return;
+    }
+
+    // Limpar qualquer estado pendente
+    if (sock) {
+        await stopBot();
     }
 
     isRunning = true;
     botRunning = true;
-    testMode = TEST_MODE;
-    sender.send('log', `Iniciando o bot... (Modo de teste: ${testMode})`);
+    stopSignal = null;
+    sender.send('log', 'Iniciando o bot...');
 
-    if (testMode) {
-        sender.send('log', '🚀 Modo de teste ativado. Nenhuma mensagem será enviada.');
-        await enviarMensagens(null, sender, testMode);
-        sender.send('log', 'Modo de teste concluído. Bot permanecerá ativo para novas requisições.');
-    } else {
+    try {
         const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-        sender.send('log', `[DEBUG] Estado de autenticação carregado: ${JSON.stringify(state)}`);
+        const { version } = await fetchLatestBaileysVersion();
 
         sock = makeWASocket({
+            version,
             auth: state,
             printQRInTerminal: false,
-            connectTimeoutMs: 30000, // Timeout de 30 segundos para conexão
-            keepAliveIntervalMs: 30000, // Envia keep-alive a cada 30 segundos
-            defaultQueryTimeoutMs: 60000, // Timeout para queries
+            logger: P({ level: 'info' }),
+            browser: Browsers.macOS('Desktop'),
+            syncFullHistory: false,
+            generateHighQualityLinkPreview: false,
+            patchMessageBeforeSending: (message) => {
+                const requiresPatch = !!(
+                    message.buttonsMessage ||
+                    message.templateMessage ||
+                    message.listMessage
+                );
+                if (requiresPatch) {
+                    message = {
+                        viewOnceMessage: {
+                            message: {
+                                messageContextInfo: {
+                                    deviceListMetadataVersion: 2,
+                                    deviceListMetadata: {},
+                                },
+                                ...message,
+                            },
+                        },
+                    };
+                }
+                return message;
+            },
         });
 
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
+            const { connection, lastDisconnect, qr, isNewLogin } = update;
 
             if (qr) {
                 const qrCodeUrl = await qrcode.toDataURL(qr);
-                sender.send('log', qrCodeUrl);
+                sender.send('qr', qrCodeUrl);
+                sender.send('log', '📱 QR Code gerado. Escaneie com seu WhatsApp.');
+            }
+
+            if (isNewLogin) {
+                sender.send('log', 'Nova sessão de login detectada.');
             }
 
             if (connection === 'open') {
                 sender.send('log', '✅ Conectado ao WhatsApp!');
-                await enviarMensagens(sock, sender, testMode);
+                await enviarMensagens(sock, sender);
             } else if (connection === 'close') {
                 const errorMessage = lastDisconnect?.error?.message || 'Motivo desconhecido';
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
-                sender.send('log', `❌ Conexão fechada! Motivo: ${errorMessage} (Status Code: ${statusCode})`);
+                sender.send('log', `❌ Conexão fechada: ${errorMessage} (Código: ${statusCode})`);
 
                 if (statusCode === DisconnectReason.loggedOut) {
-                    sender.send('log', '❌ Usuário deslogado! Sessão expirada. Use o botão "Limpar Sessão" para gerar um novo QR Code.');
-                    await clearSession(); // Limpa automaticamente o auth_info
-                    isRunning = false;
-                    botRunning = false;
+                    sender.send('log', '❌ Sessão expirada. Use "Limpar Sessão" para gerar um novo QR Code.');
+                    await clearSession();
+                    await stopBot();
                 } else {
-                    sender.send('log', 'Tentando reconectar em 5 segundos...');
-                    setTimeout(() => {
-                        if (isRunning) startBot(sender, testMode);
-                    }, 5000);
+                    sender.send('log', '🔄 Tentando reconectar...');
+                    await stopBot();
+                    startBot(sender);
                 }
             }
         });
+
+        let lastSyncLogTime = 0;
+        sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+            const now = Date.now();
+            if (now - lastSyncLogTime > 5000) {
+                sender.send('log', '📥 Sincronização concluída com sucesso.');
+                lastSyncLogTime = now;
+            }
+        });
+    } catch (err) {
+        sender.send('log', `❌ Erro ao iniciar bot: ${err.message}`);
+        await stopBot();
     }
 }
 
-function stopBot() {
+async function stopBot() {
     if (sock) {
+        try {
+            await sock.logout();
+        } catch (err) {
+            console.error('Erro ao fazer logout:', err);
+            sendLog(`⚠️ Erro ao fazer logout: ${err.message}`);
+        }
+        sock.ev.removeAllListeners();
         sock.end();
         sock = null;
     }
     isRunning = false;
     botRunning = false;
-    sendLog('Bot parado manualmente.');
+    stopSignal = new Error('Bot parado');
+    sendLog('⛔ Bot parado.');
 }
 
 async function clearSession() {
     try {
         await fs.rm('auth_info', { recursive: true, force: true });
-        sendLog('Diretório auth_info limpo com sucesso. Pronto para gerar um novo QR Code.');
+        sendLog('🧹 Sessão limpa com sucesso. Pronto para gerar um novo QR Code.');
     } catch (error) {
-        sendLog(`⚠️ Erro ao limpar o diretório auth_info: ${error.message}`);
+        sendLog(`⚠️ Erro ao limpar sessão: ${error.message}`);
     }
 }
 
 function formatarNumeroTelefone(numero) {
-    let numeroLimpo = numero.replace(/\D/g, '');
-    console.log(`[DEBUG] Número limpo: ${numeroLimpo}`);
-
-    if (numeroLimpo.startsWith('55') && numeroLimpo.length >= 11) {
-        const ddd = numeroLimpo.substring(2, 4);
-        const telefone = numeroLimpo.substring(4);
-        if (telefone.length === 9 && telefone.startsWith('9')) {
-            const parte1 = telefone.substring(0, 4);
-            const parte2 = telefone.substring(4);
-            const numeroFormatado = `+55 ${ddd} ${parte1}-${parte2}`;
-            const numeroParaEnvio = numeroLimpo;
-            return { numeroFormatado, numeroParaEnvio };
-        }
+    const numeroLimpo = numero.replace(/\D/g, '');
+    if (numeroLimpo.length >= 11) {
+        return {
+            numeroFormatado: `+${numeroLimpo.slice(0, 2)} ${numeroLimpo.slice(2, 4)} ${numeroLimpo.slice(4, 9)}-${numeroLimpo.slice(9)}`,
+            numeroParaEnvio: numeroLimpo
+        };
     }
-
-    if (numeroLimpo.length === 10 || numeroLimpo.length === 11) {
-        if (numeroLimpo.length === 10 && !numeroLimpo.startsWith('0')) {
-            numeroLimpo = '55' + numeroLimpo;
-        } else if (numeroLimpo.length === 11 && !numeroLimpo.startsWith('55')) {
-            numeroLimpo = '55' + numeroLimpo.substring(1);
-        }
-        const ddd = numeroLimpo.substring(2, 4);
-        const telefone = numeroLimpo.substring(4);
-        if (telefone.length === 9 && telefone.startsWith('9')) {
-            const parte1 = telefone.substring(0, 4);
-            const parte2 = telefone.substring(4);
-            const numeroFormatado = `+55 ${ddd} ${parte1}-${parte2}`;
-            const numeroParaEnvio = numeroLimpo;
-            return { numeroFormatado, numeroParaEnvio };
-        }
-    }
-
-    console.warn(`⚠️ Número inválido: ${numero}`);
     return { numeroFormatado: null, numeroParaEnvio: null };
 }
 
-function extrairPrimeiroNome(nomeCompleto) {
-    if (!nomeCompleto || typeof nomeCompleto !== 'string') return '';
-    const partes = nomeCompleto.trim().split(' ');
-    const primeiroNome = partes[0] || '';
-    return primeiroNome ? primeiroNome.charAt(0).toUpperCase() + primeiroNome.slice(1).toLowerCase() : '';
+function extrairPrimeiroNome(nome) {
+    return nome?.split(' ')[0] ?? '';
 }
 
 function extrairNomeDoEmail(email) {
-    if (!email || typeof email !== 'string') return '';
-    const partes = email.split('@');
-    if (partes.length < 2) return '';
-    let nomeParte = partes[0];
-    let nomes = [];
-    if (nomeParte.includes('.')) nomes = nomeParte.split('.');
-    else if (nomeParte.includes('_')) nomes = nomeParte.split('_');
-    else {
-        const regex = /([a-z])([A-Z])/g;
-        nomeParte = nomeParte.replace(regex, '$1 $2');
-        nomes = nomeParte.split(/(\s+)/).filter(part => part.trim().length > 0);
-        if (nomes.length === 1) {
-            const match = nomeParte.match(/([a-z]+)([A-Z][a-z]+)/);
-            if (match) nomes = [match[1], match[2].toLowerCase()];
-        }
-    }
-    return nomes.map(nome => nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase()).filter(nome => nome).join(' ');
+    return email?.split('@')[0]?.replace(/[._]/g, ' ') ?? '';
 }
 
 async function carregarContatos(sender) {
     const contatosPorDia = {};
     try {
         const alunos = await fetchEnrolled();
+        sender.send('log', `📋 Carregando contatos... Total de alunos: ${alunos.length}`);
+
         for (const aluno of alunos) {
-            const status = aluno.status || '';
-            if (!['Ativo', 'EmRecuperacao', 'Atencao'].includes(status)) {
-                sender.send('log', `⚠️ Aluno ignorado (status não permitido): ${aluno.nomeCompleto || 'Nome não disponível'} - Status: ${status}`);
+            if (!['Ativo', 'EmRecuperacao', 'Atencao'].includes(aluno.status)) continue;
+
+            const { numeroParaEnvio, numeroFormatado } = formatarNumeroTelefone(aluno.cel ?? '');
+            const primeiroNome = extrairPrimeiroNome(aluno.nomeCompleto);
+            const agente = extrairNomeDoEmail(aluno.agenteDoSucesso);
+            const monitoringDay = aluno.monitoringDay ?? '';
+            const [dia] = monitoringDay.split(' às');
+            const diaChave = dia?.toLowerCase()?.trim() || '';
+
+            // Removido o log detalhado de cada aluno
+            // sender.send('log', `🔍 Aluno: ${primeiroNome}, Dia: ${diaChave}, Monitoring: ${monitoringDay}`);
+
+            if (!numeroParaEnvio || !primeiroNome || !aluno.monitoringLink || !diaChave) {
+                // Removido o log de erro por falta de dados
+                // sender.send('log', `⚠️ Contato inválido: ${primeiroNome} (Faltando dados)`);
                 continue;
             }
-            const nomeCompleto = aluno.nomeCompleto || '';
-            const primeiroNome = extrairPrimeiroNome(nomeCompleto);
-            const monitoringDay = aluno.monitoringDay || '';
-            const agenteDoSucessoEmail = aluno.agenteDoSucesso || '';
-            const agenteDoSucesso = extrairNomeDoEmail(agenteDoSucessoEmail);
-            const numero = aluno.cel ? aluno.cel.replace(/\D/g, '') : '';
-            const monitoringLink = aluno.monitoringLink || '';
 
-            const [dia] = monitoringDay.split(' às ').map(str => str.trim());
-            const diaNormalizado = dia ? dia.toLowerCase().replace('feira', '').trim() : '';
+            if (!contatosPorDia[diaChave]) contatosPorDia[diaChave] = [];
 
-            const { numeroFormatado, numeroParaEnvio } = formatarNumeroTelefone(numero);
-            if (!primeiroNome || !numeroFormatado || !numeroParaEnvio || !diaNormalizado || !monitoringLink) {
-                sender.send('log', `⚠️ Dados incompletos para o aluno: ${JSON.stringify(aluno)}`);
-                continue;
-            }
-            if (!contatosPorDia[diaNormalizado]) contatosPorDia[diaNormalizado] = [];
-            contatosPorDia[diaNormalizado].push({
+            contatosPorDia[diaChave].push({
                 numero: numeroParaEnvio,
                 numeroFormatado,
                 nome: primeiroNome,
-                nomeCompleto,
-                monitoringDay,
-                agenteDoSucesso,
-                monitoringLink,
+                agenteDoSucesso: agente,
+                monitoringDay: aluno.monitoringDay,
+                monitoringLink: aluno.monitoringLink
             });
         }
+
+        sender.send('log', `📊 Contatos carregados: ${JSON.stringify(Object.keys(contatosPorDia))}`);
         return contatosPorDia;
     } catch (error) {
-        sender.send('log', `⚠️ Erro ao processar contatos: ${error.message}`);
+        sender.send('log', `⚠️ Erro ao carregar contatos: ${error.message}`);
         throw error;
     }
 }
 
-async function enviarMensagens(sock, sender, TEST_MODE) {
-    if (!isRunning) return;
-
+async function enviarMensagens(sock, sender) {
     const contatos = await carregarContatos(sender);
-    const hoje = new Date().toLocaleString('pt-BR', { weekday: 'long' }).toLowerCase().replace('feira', '').replace('-', '').trim();
-    sender.send('log', `Hoje é: ${hoje}`);
+    const hoje = new Date().toLocaleString('pt-BR', { weekday: 'long' }).toLowerCase().replace('-feira', '').trim();
+    sender.send('log', `📅 Hoje é: ${hoje}`);
 
-    if (contatos[hoje]) {
-        sender.send('log', `Enviando mensagens para ${contatos[hoje].length} contatos com intervalo de 20 segundos...`);
-        for (let i = 0; i < contatos[hoje].length && isRunning; i++) {
-            const contato = contatos[hoje][i];
-            const { numero, numeroFormatado, nome, monitoringDay, agenteDoSucesso, monitoringLink } = contato;
-            const numeroWhatsApp = `${numero}@s.whatsapp.net`;
-            const mensagem = `Olá ${nome}! 🚀 Passando aqui para lembrar sobre o atendimento semanal obrigatório com o Agente de Sucesso ${agenteDoSucesso}, ${monitoringDay}. Posso contar com a sua presença? 👇👇\n${monitoringLink}`;
+    if (!contatos[hoje]) {
+        sender.send('log', 'Nenhum contato para hoje.');
+        return;
+    }
 
-            if (TEST_MODE) {
-                sender.send('log', `[TESTE] Mensagem que seria enviada para ${numeroFormatado} (${nome}): "${mensagem}"`);
-            } else {
-                try {
-                    await sock.sendMessage(numeroWhatsApp, { text: mensagem });
-                    sender.send('log', `Mensagem enviada para ${numeroFormatado} (${nome})`);
-                } catch (error) {
-                    sender.send('log', `⚠️ Erro ao enviar mensagem para ${numeroFormatado}: ${error.message}`);
-                }
-            }
-
-            if (i < contatos[hoje].length - 1 && isRunning) {
-                sender.send('log', `Aguardando 20 segundos antes de enviar a próxima mensagem...`);
-                await delay(20000);
-            }
+    for (const contato of contatos[hoje]) {
+        if (stopSignal) {
+            sender.send('log', '⛔ Envio de mensagens interrompido: Bot foi parado.');
+            throw stopSignal;
         }
-        if (isRunning) {
-            sender.send('log', 'Todas as mensagens foram enviadas!');
+
+        const numeroWhatsApp = `${contato.numero}@s.whatsapp.net`;
+        const mensagem = `Olá ${contato.nome}! 🚀 Lembrete do atendimento semanal com ${contato.agenteDoSucesso}, ${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
+
+        try {
+            if (stopSignal) {
+                sender.send('log', '⛔ Envio de mensagens interrompido: Bot foi parado.');
+                throw stopSignal;
+            }
+            await Promise.race([
+                sock.sendMessage(numeroWhatsApp, { text: mensagem }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo limite excedido')), 10000))
+            ]);
+            sender.send('log', `✅ Mensagem enviada para ${contato.numeroFormatado}`);
+        } catch (err) {
+            if (err === stopSignal) {
+                throw err;
+            }
+            // Removido o nome do aluno do log de erro
+            sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado}: ${err.message}`);
         }
-    } else {
-        sender.send('log', 'Nenhum contato para enviar hoje. Bot permanecerá ativo.');
+
+        sender.send('log', `⏳ Aguardando 20s...`);
+        await delay(20000);
+    }
+
+    if (!stopSignal) {
+        sender.send('log', '✅ Todas as mensagens do dia foram enviadas.');
     }
 }
 
 app.post('/start-bot', (req, res) => {
-    if (botRunning) {
-        return res.status(400).json({ message: 'Bot já está em execução!' });
-    }
-    testMode = req.body.testMode !== undefined ? req.body.testMode : true;
+    if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
     botRunning = true;
-    startBot({ send: (type, message) => sendLog(message) }, testMode);
+    startBot({ send: (type, message) => sendLog(message) });
     res.json({ message: 'Bot iniciado.' });
 });
 
-app.post('/stop-bot', (req, res) => {
-    if (!botRunning) {
-        return res.status(400).json({ message: 'Bot não está em execução!' });
-    }
-    stopBot();
+app.post('/stop-bot', async (req, res) => {
+    if (!botRunning) return res.status(400).json({ message: 'Bot não está em execução!' });
+    await stopBot();
     res.json({ message: 'Bot parado.' });
 });
 
 app.get('/status', (req, res) => {
-    res.json({ running: botRunning, testMode });
+    res.json({ running: botRunning });
 });
 
 app.post('/clear-session', async (req, res) => {
-    if (botRunning) {
-        stopBot();
-    }
+    if (botRunning) await stopBot();
     await clearSession();
-    res.json({ message: 'Sessão limpa. Inicie o bot novamente para gerar um novo QR Code.' });
+    res.json({ message: 'Sessão limpa.' });
 });
 
-process.on('uncaughtException', (error) => {
-    console.error('Erro não tratado.Concurrent', error);
-    sendLog(`Erro não tratado: ${error.message}`);
+process.on('uncaughtException', (err) => {
+    console.error('Erro não tratado:', err);
+    sendLog(`❌ Erro não tratado: ${err.message}`);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
     console.error('Rejeição não tratada:', reason);
-    sendLog(`Rejeição não tratada: ${reason.message}`);
+    sendLog(`❌ Rejeição não tratada: ${reason.message || reason}`);
 });

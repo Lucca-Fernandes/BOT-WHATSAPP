@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { TextField, Button, Typography, Box, Alert, CircularProgress } from '@mui/material';
+import { TextField, Button, Box, Alert, CircularProgress } from '@mui/material';
+
+import logo from '../assets/logo-horizontal-texto-preto.png'; 
 
 function Login() {
     const [username, setUsername] = useState('');
@@ -46,9 +48,14 @@ function Login() {
                     textAlign: 'center',
                 }}
             >
-                <Typography variant="h5" gutterBottom>
-                    Login
-                </Typography>
+                <img
+                    src={logo}
+                    alt="Logo"
+                    style={{
+                        maxWidth: '220px', 
+                        marginBottom: '16px', 
+                    }}
+                />
                 <form onSubmit={handleSubmit}>
                     <TextField
                         label="Usuário"
@@ -59,6 +66,38 @@ function Login() {
                         onChange={(e) => setUsername(e.target.value)}
                         required
                         disabled={isLoading}
+                        sx={{
+                            '& .MuiOutlinedInput-root': {
+                                '& fieldset': {
+                                    borderColor: '#000000', // Borda preta
+                                    transition: 'none', // Remove transições
+                                },
+                                '&:hover fieldset': {
+                                    borderColor: '#000000', // Borda preta no hover
+                                    transition: 'none', // Remove transições
+                                },
+                                '&.Mui-focused fieldset': {
+                                    borderColor: '#000000', // Borda preta no foco
+                                    transition: 'none', // Remove transições
+                                },
+                            },
+                            '& .MuiInputLabel-root': {
+                                color: '#000000', // Cor do label preta
+                                transform: 'translate(14px, -6px) scale(0.75)', // Fixa o label na posição "flutuante"
+                                backgroundColor: 'white', // Fundo branco para cobrir a borda
+                                padding: '0 4px', // Espaçamento para o fundo
+                                transition: 'none', // Remove transições
+                            },
+                            '& .MuiInputLabel-root.Mui-focused': {
+                                color: '#000000', // Cor do label preta no foco
+                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo
+                                transition: 'none', // Remove transições
+                            },
+                            '& .MuiInputLabel-root.MuiFormLabel-filled': {
+                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo quando preenchido
+                                transition: 'none', // Remove transições
+                            },
+                        }}
                     />
                     <TextField
                         label="Senha"
@@ -70,6 +109,38 @@ function Login() {
                         onChange={(e) => setPassword(e.target.value)}
                         required
                         disabled={isLoading}
+                        sx={{
+                            '& .MuiOutlinedInput-root': {
+                                '& fieldset': {
+                                    borderColor: '#000000', // Borda preta
+                                    transition: 'none', // Remove transições
+                                },
+                                '&:hover fieldset': {
+                                    borderColor: '#000000', // Borda preta no hover
+                                    transition: 'none', // Remove transições
+                                },
+                                '&.Mui-focused fieldset': {
+                                    borderColor: '#000000', // Borda preta no foco
+                                    transition: 'none', // Remove transições
+                                },
+                            },
+                            '& .MuiInputLabel-root': {
+                                color: '#000000', // Cor do label preta
+                                transform: 'translate(14px, -6px) scale(0.75)', // Fixa o label na posição "flutuante"
+                                backgroundColor: 'white', // Fundo branco para cobrir a borda
+                                padding: '0 4px', // Espaçamento para o fundo
+                                transition: 'none', // Remove transições
+                            },
+                            '& .MuiInputLabel-root.Mui-focused': {
+                                color: '#000000', // Cor do label preta no foco
+                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo
+                                transition: 'none', // Remove transições
+                            },
+                            '& .MuiInputLabel-root.MuiFormLabel-filled': {
+                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo quando preenchido
+                                transition: 'none', // Remove transições
+                            },
+                        }}
                     />
                     {error && (
                         <Alert severity="error" sx={{ mt: 2 }}>
@@ -79,9 +150,15 @@ function Login() {
                     <Button
                         type="submit"
                         variant="contained"
-                        color="primary"
                         fullWidth
-                        sx={{ mt: 2 }}
+                        sx={{
+                            mt: 2,
+                            backgroundColor: '#000000', // Cor de fundo preta
+                            color: '#ffffff', 
+                            '&:hover': {
+                                backgroundColor: '#444444', 
+                            },
+                        }}
                         disabled={isLoading}
                     >
                         {isLoading ? <CircularProgress size={24} /> : 'Entrar'}
