@@ -7,6 +7,13 @@ import {
     Paper,
     Divider,
     CircularProgress,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
+    Collapse,
 } from '@mui/material';
 
 import logo from '../assets/logo-horizontal-texto-preto.png'; 
@@ -18,10 +25,40 @@ function BotInterface() {
     const [isStarting, setIsStarting] = useState(false);
     const [isStopping, setIsStopping] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
+    const [contactLogs, setContactLogs] = useState([]);
+    const [groupedContactLogs, setGroupedContactLogs] = useState({});
+    const [selectedAgent, setSelectedAgent] = useState(null);
     const logAreaRef = useRef(null);
     const wsRef = useRef(null);
 
     const API_URL = 'http://localhost:5000';
+    const WS_URL = 'ws://localhost:5000';
+
+    // Configurar axios para enviar a chave de sessão em todas as requisições
+    const setupAxiosInterceptors = () => {
+        axios.interceptors.request.use(
+            (config) => {
+                const sessionKey = localStorage.getItem('sessionKey');
+                if (sessionKey) {
+                    config.headers['x-session-key'] = sessionKey;
+                }
+                return config;
+            },
+            (error) => Promise.reject(error)
+        );
+
+        axios.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                if (error.response?.status === 401) {
+                    localStorage.removeItem('sessionKey');
+                    localStorage.removeItem('isAuthenticated');
+                    window.location.href = '/login';
+                }
+                return Promise.reject(error);
+            }
+        );
+    };
 
     const fetchStatus = async () => {
         try {
@@ -33,9 +70,37 @@ function BotInterface() {
         }
     };
 
+    const fetchContactLogs = async () => {
+        try {
+            const response = await axios.get(`${API_URL}/contact-logs`);
+            setContactLogs(response.data);
+        } catch (error) {
+            console.error('Erro ao buscar logs de contatos inválidos:', error);
+            setContactLogs([]);
+        }
+    };
+
+    const groupContactLogsByAgent = (logs) => {
+        const grouped = {};
+        logs.forEach((log) => {
+            const agent = log.agent;
+            if (!grouped[agent]) {
+                grouped[agent] = [];
+            }
+            grouped[agent].push(log);
+        });
+        return grouped;
+    };
+
     const connectWebSocket = () => {
         try {
-            const ws = new WebSocket('ws://localhost:5000');
+            const sessionKey = localStorage.getItem('sessionKey');
+            if (!sessionKey) {
+                window.location.href = '/login';
+                return;
+            }
+
+            const ws = new WebSocket(`${WS_URL}?sessionKey=${sessionKey}`);
             wsRef.current = ws;
 
             ws.onopen = () => {
@@ -51,7 +116,9 @@ function BotInterface() {
                             setQrCode(data.message);
                             setLogs((prevLogs) => [...prevLogs, 'QR Code recebido']);
                         } else {
-                            setLogs((prevLogs) => [...prevLogs, data.message]);
+                            if (!data.message.includes('Contato inválido')) {
+                                setLogs((prevLogs) => [...prevLogs, data.message]);
+                            }
                             if (data.message.includes('Bot parado')) {
                                 setIsBotRunning(false);
                                 setQrCode(null);
@@ -82,10 +149,21 @@ function BotInterface() {
     };
 
     useEffect(() => {
+        const isAuthenticated = localStorage.getItem('isAuthenticated');
+        if (!isAuthenticated) {
+            window.location.href = '/login';
+            return;
+        }
+
+        setupAxiosInterceptors();
         fetchStatus();
         connectWebSocket();
+        fetchContactLogs();
+
+        const interval = setInterval(fetchContactLogs, 5000);
 
         return () => {
+            clearInterval(interval);
             if (wsRef.current) {
                 wsRef.current.close();
             }
@@ -97,6 +175,11 @@ function BotInterface() {
             logAreaRef.current.scrollTop = logAreaRef.current.scrollHeight;
         }
     }, [logs]);
+
+    useEffect(() => {
+        const grouped = groupContactLogsByAgent(contactLogs);
+        setGroupedContactLogs(grouped);
+    }, [contactLogs]);
 
     const handleStartBot = async () => {
         setIsStarting(true);
@@ -149,9 +232,20 @@ function BotInterface() {
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('isAuthenticated');
-        window.location.href = '/login';
+    const handleLogout = async () => {
+        try {
+            await axios.post(`${API_URL}/logout`);
+            localStorage.removeItem('sessionKey');
+            localStorage.removeItem('isAuthenticated');
+            window.location.href = '/login';
+        } catch (error) {
+            console.error('Erro ao fazer logout:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao fazer logout: ${error.message}`]);
+        }
+    };
+
+    const handleAgentClick = (agent) => {
+        setSelectedAgent(selectedAgent === agent ? null : agent);
     };
 
     return (
@@ -162,8 +256,9 @@ function BotInterface() {
                         src={logo}
                         alt="Projeto Desenvolve Logo"
                         style={{
-                            maxWidth: '220px',
+                            maxWidth: '240px',
                             height: 'auto',
+                            marginBottom: '10px'
                         }}
                     />
                 </Box>
@@ -225,7 +320,7 @@ function BotInterface() {
                 </Box>
             )}
 
-            <Paper sx={{ p: 2, maxHeight: 400, overflowY: 'auto' }} ref={logAreaRef}>
+            <Paper sx={{ p: 2, mb: 5, maxHeight: 400, overflowY: 'auto' }} ref={logAreaRef}>
                 <Typography variant="h6">Logs</Typography>
                 <Divider sx={{ mb: 2 }} />
                 {logs.map((log, index) => (
@@ -233,6 +328,49 @@ function BotInterface() {
                         {log}
                     </Typography>
                 ))}
+            </Paper>
+
+            <Paper sx={{ p: 2, mb: 3 }}>
+                <Typography variant="h6">Contatos Inválidos</Typography>
+                <Divider sx={{ mb: 2 }} />
+                {Object.keys(groupedContactLogs).length === 0 ? (
+                    <Typography variant="body2">Nenhum contato inválido registrado.</Typography>
+                ) : (
+                    Object.keys(groupedContactLogs).map((agent) => (
+                        <Box key={agent} sx={{ mb: 2 }}>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                onClick={() => handleAgentClick(agent)}
+                                sx={{ width: '100%', textAlign: 'left' }}
+                            >
+                                {agent} ({groupedContactLogs[agent].length} contatos inválidos)
+                            </Button>
+                            <Collapse in={selectedAgent === agent}>
+                                <TableContainer sx={{ mt: 1 }}>
+                                    <Table>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>Aluno</TableCell>
+                                                <TableCell>Registration Code</TableCell>
+                                                <TableCell>Motivo</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {groupedContactLogs[agent].map((log, index) => (
+                                                <TableRow key={index}>
+                                                    <TableCell>{log.student}</TableCell>
+                                                    <TableCell>{log.registrationCode}</TableCell>
+                                                    <TableCell>{log.reason}</TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            </Collapse>
+                        </Box>
+                    ))
+                )}
             </Paper>
         </Box>
     );

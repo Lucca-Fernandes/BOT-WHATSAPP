@@ -17,7 +17,10 @@ const P = require('pino');
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors());
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Permitir apenas o frontend
+    credentials: true,
+}));
 app.use(express.json());
 
 let botRunning = false;
@@ -25,6 +28,8 @@ let wssClients = [];
 let sock = null;
 let isRunning = false;
 let stopSignal = null;
+let contactLogs = [];
+const sessions = new Map(); // Armazenar chaves de sessão
 
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
@@ -32,7 +37,82 @@ const server = app.listen(port, () => {
 
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws) => {
+// Função para gerar uma chave de sessão simples
+const generateSessionKey = () => {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+};
+
+// Middleware para verificar a chave de sessão
+const authenticateSession = (req, res, next) => {
+    const sessionKey = req.headers['x-session-key'];
+    if (!sessionKey || !sessions.has(sessionKey)) {
+        return res.status(401).json({ message: 'Não autorizado' });
+    }
+    req.sessionKey = sessionKey;
+    next();
+};
+
+// Rota de login
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+
+    const validUsername = process.env.ADMIN_USERNAME || 'admin';
+    const validPassword = process.env.ADMIN_PASSWORD || '123456';
+
+    if (username !== validUsername || password !== validPassword) {
+        return res.status(401).json({ message: 'Usuário ou senha incorretos' });
+    }
+
+    const sessionKey = generateSessionKey();
+    sessions.set(sessionKey, { username });
+    res.json({ sessionKey });
+});
+
+// Rota de logout
+app.post('/logout', authenticateSession, (req, res) => {
+    sessions.delete(req.sessionKey);
+    res.json({ message: 'Logout realizado com sucesso' });
+});
+
+// Proteger as rotas existentes
+app.post('/start-bot', authenticateSession, (req, res) => {
+    if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
+    contactLogs = []; // Limpar logs ao iniciar o bot
+    botRunning = true;
+    startBot({ send: (type, message) => sendLog(message) });
+    res.json({ message: 'Bot iniciado.' });
+});
+
+app.post('/stop-bot', authenticateSession, async (req, res) => {
+    if (!botRunning) return res.status(400).json({ message: 'Bot não está em execução!' });
+    await stopBot();
+    res.json({ message: 'Bot parado.' });
+});
+
+app.get('/status', authenticateSession, (req, res) => {
+    res.json({ running: botRunning });
+});
+
+app.post('/clear-session', authenticateSession, async (req, res) => {
+    if (botRunning) await stopBot();
+    await clearSession();
+    res.json({ message: 'Sessão limpa.' });
+});
+
+app.get('/contact-logs', authenticateSession, (req, res) => {
+    res.json(contactLogs);
+});
+
+// Proteger o WebSocket
+wss.on('connection', (ws, req) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const sessionKey = url.searchParams.get('sessionKey');
+
+    if (!sessionKey || !sessions.has(sessionKey)) {
+        ws.close(1008, 'Não autorizado');
+        return;
+    }
+
     console.log('Novo cliente WebSocket conectado');
     wssClients.push(ws);
 
@@ -52,13 +132,22 @@ const sendLog = (message) => {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Função para adicionar um log de não-contato
+const addContactLog = (agent, student, registrationCode, reason) => {
+    contactLogs.push({
+        agent,
+        student,
+        registrationCode,
+        reason,
+    });
+};
+
 async function startBot(sender) {
     if (isRunning) {
         sender.send('log', '⚠️ Bot já está em execução...');
         return;
     }
 
-    // Limpar qualquer estado pendente
     if (sock) {
         await stopBot();
     }
@@ -162,7 +251,7 @@ async function stopBot() {
         }
         sock.ev.removeAllListeners();
         sock.end();
-        sock = null;
+         sock = null;
     }
     isRunning = false;
     botRunning = false;
@@ -183,7 +272,7 @@ function formatarNumeroTelefone(numero) {
     const numeroLimpo = numero.replace(/\D/g, '');
     if (numeroLimpo.length >= 11) {
         return {
-            numeroFormatado: `+${numeroLimpo.slice(0, 2)} ${numeroLimpo.slice(2, 4)} ${numeroLimpo.slice(4, 9)}-${numeroLimpo.slice(9)}`,
+            numeroFormatado: `+${numeroLimpo.slice(0, 2)} ${numeroLimpo.slice(2, 4)} ${numeroLimpo.slice(4, 9)}-${numeroLimpo.slice(9 | 'Desconhecido')}`,
             numeroParaEnvio: numeroLimpo
         };
     }
@@ -213,13 +302,16 @@ async function carregarContatos(sender) {
             const monitoringDay = aluno.monitoringDay ?? '';
             const [dia] = monitoringDay.split(' às');
             const diaChave = dia?.toLowerCase()?.trim() || '';
-
-            // Removido o log detalhado de cada aluno
-            // sender.send('log', `🔍 Aluno: ${primeiroNome}, Dia: ${diaChave}, Monitoring: ${monitoringDay}`);
+            const registrationCode = aluno.registrationCode ?? 'Desconhecido';
 
             if (!numeroParaEnvio || !primeiroNome || !aluno.monitoringLink || !diaChave) {
-                // Removido o log de erro por falta de dados
-                // sender.send('log', `⚠️ Contato inválido: ${primeiroNome} (Faltando dados)`);
+                addContactLog(
+                    agente,
+                    primeiroNome || 'Nome Desconhecido',
+                    registrationCode,
+                    'Faltando dados'
+                );
+                sender.send('log', `⚠️ Contato inválido: ${primeiroNome || 'Nome Desconhecido'} (Registration Code: ${registrationCode}) - Faltando dados`);
                 continue;
             }
 
@@ -231,7 +323,8 @@ async function carregarContatos(sender) {
                 nome: primeiroNome,
                 agenteDoSucesso: agente,
                 monitoringDay: aluno.monitoringDay,
-                monitoringLink: aluno.monitoringLink
+                monitoringLink: aluno.monitoringLink,
+                registrationCode: registrationCode
             });
         }
 
@@ -276,8 +369,13 @@ async function enviarMensagens(sock, sender) {
             if (err === stopSignal) {
                 throw err;
             }
-            // Removido o nome do aluno do log de erro
-            sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado}: ${err.message}`);
+            addContactLog(
+                contato.agenteDoSucesso,
+                contato.nome,
+                contato.registrationCode,
+                err.message
+            );
+            sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado} (Registration Code: ${contato.registrationCode}): ${err.message}`);
         }
 
         sender.send('log', `⏳ Aguardando 20s...`);
@@ -288,29 +386,6 @@ async function enviarMensagens(sock, sender) {
         sender.send('log', '✅ Todas as mensagens do dia foram enviadas.');
     }
 }
-
-app.post('/start-bot', (req, res) => {
-    if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
-    botRunning = true;
-    startBot({ send: (type, message) => sendLog(message) });
-    res.json({ message: 'Bot iniciado.' });
-});
-
-app.post('/stop-bot', async (req, res) => {
-    if (!botRunning) return res.status(400).json({ message: 'Bot não está em execução!' });
-    await stopBot();
-    res.json({ message: 'Bot parado.' });
-});
-
-app.get('/status', (req, res) => {
-    res.json({ running: botRunning });
-});
-
-app.post('/clear-session', async (req, res) => {
-    if (botRunning) await stopBot();
-    await clearSession();
-    res.json({ message: 'Sessão limpa.' });
-});
 
 process.on('uncaughtException', (err) => {
     console.error('Erro não tratado:', err);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TextField, Button, Box, Alert, CircularProgress } from '@mui/material';
+import axios from 'axios';
 
 import logo from '../assets/logo-horizontal-texto-preto.png'; 
 
@@ -9,23 +10,27 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = (e) => {
+    const API_URL = 'http://localhost:5000'; // URL fixa por enquanto
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setIsLoading(true);
 
-        setTimeout(() => {
-            const validUsername = 'admin';
-            const validPassword = '123456';
+        try {
+            const response = await axios.post(`${API_URL}/login`, {
+                username,
+                password,
+            });
 
-            if (username === validUsername && password === validPassword) {
-                localStorage.setItem('isAuthenticated', 'true');
-                window.location.href = '/bot';
-            } else {
-                setError('Usuário ou senha incorretos');
-            }
+            const { sessionKey } = response.data;
+            localStorage.setItem('sessionKey', sessionKey);
+            localStorage.setItem('isAuthenticated', 'true');
+            window.location.href = '/bot';
+        } catch (err) {
+            setError(err.response?.data?.message || 'Erro ao fazer login');
             setIsLoading(false);
-        }, 1000);
+        }
     };
 
     return (
@@ -52,7 +57,7 @@ function Login() {
                     src={logo}
                     alt="Logo"
                     style={{
-                        maxWidth: '220px', 
+                        maxWidth: '230px', 
                         marginBottom: '16px', 
                     }}
                 />
@@ -69,33 +74,33 @@ function Login() {
                         sx={{
                             '& .MuiOutlinedInput-root': {
                                 '& fieldset': {
-                                    borderColor: '#000000', // Borda preta
-                                    transition: 'none', // Remove transições
+                                    borderColor: '#000000',
+                                    transition: 'none',
                                 },
                                 '&:hover fieldset': {
-                                    borderColor: '#000000', // Borda preta no hover
-                                    transition: 'none', // Remove transições
+                                    borderColor: '#000000',
+                                    transition: 'none',
                                 },
                                 '&.Mui-focused fieldset': {
-                                    borderColor: '#000000', // Borda preta no foco
-                                    transition: 'none', // Remove transições
+                                    borderColor: '#000000',
+                                    transition: 'none',
                                 },
                             },
                             '& .MuiInputLabel-root': {
-                                color: '#000000', // Cor do label preta
-                                transform: 'translate(14px, -6px) scale(0.75)', // Fixa o label na posição "flutuante"
-                                backgroundColor: 'white', // Fundo branco para cobrir a borda
-                                padding: '0 4px', // Espaçamento para o fundo
-                                transition: 'none', // Remove transições
+                                color: '#000000',
+                                transform: 'translate(14px, -6px) scale(0.75)',
+                                backgroundColor: 'white',
+                                padding: '0 4px',
+                                transition: 'none',
                             },
                             '& .MuiInputLabel-root.Mui-focused': {
-                                color: '#000000', // Cor do label preta no foco
-                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo
-                                transition: 'none', // Remove transições
+                                color: '#000000',
+                                transform: 'translate(14px, -6px) scale(0.75)',
+                                transition: 'none',
                             },
                             '& .MuiInputLabel-root.MuiFormLabel-filled': {
-                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo quando preenchido
-                                transition: 'none', // Remove transições
+                                transform: 'translate(14px, -6px) scale(0.75)',
+                                transition: 'none',
                             },
                         }}
                     />
@@ -112,33 +117,33 @@ function Login() {
                         sx={{
                             '& .MuiOutlinedInput-root': {
                                 '& fieldset': {
-                                    borderColor: '#000000', // Borda preta
-                                    transition: 'none', // Remove transições
+                                    borderColor: '#000000',
+                                    transition: 'none',
                                 },
                                 '&:hover fieldset': {
-                                    borderColor: '#000000', // Borda preta no hover
-                                    transition: 'none', // Remove transições
+                                    borderColor: '#000000',
+                                    transition: 'none',
                                 },
                                 '&.Mui-focused fieldset': {
-                                    borderColor: '#000000', // Borda preta no foco
-                                    transition: 'none', // Remove transições
+                                    borderColor: '#000000',
+                                    transition: 'none',
                                 },
                             },
                             '& .MuiInputLabel-root': {
-                                color: '#000000', // Cor do label preta
-                                transform: 'translate(14px, -6px) scale(0.75)', // Fixa o label na posição "flutuante"
-                                backgroundColor: 'white', // Fundo branco para cobrir a borda
-                                padding: '0 4px', // Espaçamento para o fundo
-                                transition: 'none', // Remove transições
+                                color: '#000000',
+                                transform: 'translate(14px, -6px) scale(0.75)',
+                                backgroundColor: 'white',
+                                padding: '0 4px',
+                                transition: 'none',
                             },
                             '& .MuiInputLabel-root.Mui-focused': {
-                                color: '#000000', // Cor do label preta no foco
-                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo
-                                transition: 'none', // Remove transições
+                                color: '#000000',
+                                transform: 'translate(14px, -6px) scale(0.75)',
+                                transition: 'none',
                             },
                             '& .MuiInputLabel-root.MuiFormLabel-filled': {
-                                transform: 'translate(14px, -6px) scale(0.75)', // Mantém o label fixo quando preenchido
-                                transition: 'none', // Remove transições
+                                transform: 'translate(14px, -6px) scale(0.75)',
+                                transition: 'none',
                             },
                         }}
                     />
@@ -153,10 +158,10 @@ function Login() {
                         fullWidth
                         sx={{
                             mt: 2,
-                            backgroundColor: '#000000', // Cor de fundo preta
-                            color: '#ffffff', 
+                            backgroundColor: '#000000',
+                            color: '#ffffff',
                             '&:hover': {
-                                backgroundColor: '#444444', 
+                                backgroundColor: '#444444',
                             },
                         }}
                         disabled={isLoading}
