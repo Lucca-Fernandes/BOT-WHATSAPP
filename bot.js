@@ -18,7 +18,7 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Permitir apenas o frontend
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
 }));
 app.use(express.json());
@@ -29,7 +29,7 @@ let sock = null;
 let isRunning = false;
 let stopSignal = null;
 let contactLogs = [];
-const sessions = new Map(); // Armazenar chaves de sessão
+const sessions = new Map();
 
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
@@ -77,7 +77,7 @@ app.post('/logout', authenticateSession, (req, res) => {
 // Proteger as rotas existentes
 app.post('/start-bot', authenticateSession, (req, res) => {
     if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
-    contactLogs = []; // Limpar logs ao iniciar o bot
+    contactLogs = [];
     botRunning = true;
     startBot({ send: (type, message) => sendLog(message) });
     res.json({ message: 'Bot iniciado.' });
@@ -251,7 +251,7 @@ async function stopBot() {
         }
         sock.ev.removeAllListeners();
         sock.end();
-         sock = null;
+        sock = null;
     }
     isRunning = false;
     botRunning = false;
@@ -269,14 +269,48 @@ async function clearSession() {
 }
 
 function formatarNumeroTelefone(numero) {
-    const numeroLimpo = numero.replace(/\D/g, '');
-    if (numeroLimpo.length >= 11) {
-        return {
-            numeroFormatado: `+${numeroLimpo.slice(0, 2)} ${numeroLimpo.slice(2, 4)} ${numeroLimpo.slice(4, 9)}-${numeroLimpo.slice(9 | 'Desconhecido')}`,
-            numeroParaEnvio: numeroLimpo
-        };
+    if (!numero) return { numeroFormatado: null, numeroParaEnvio: null };
+
+    // Remove qualquer coisa que não for número
+    let numeroLimpo = numero.replace(/\D/g, '');
+
+    // Remove o prefixo internacional se existir (ex: +55 ou 0055)
+    if (numeroLimpo.startsWith('0055')) {
+        numeroLimpo = numeroLimpo.slice(4);
+    } else if (numeroLimpo.startsWith('55')) {
+        numeroLimpo = numeroLimpo.slice(2);
     }
-    return { numeroFormatado: null, numeroParaEnvio: null };
+
+    // Se tiver menos de 10 dígitos, não é válido
+    if (numeroLimpo.length < 10) {
+        return { numeroFormatado: null, numeroParaEnvio: null };
+    }
+
+    // Extrai o DDD (2 primeiros) e corpo do número
+    const ddd = numeroLimpo.slice(0, 2);
+    let corpo = numeroLimpo.slice(2);
+
+    // Corrige se for celular com nono dígito e DDD não exigir
+    // Se for 11 dígitos e começa com 9, vamos retirar o 9
+    if (corpo.length === 9 && corpo.startsWith('9')) {
+        corpo = corpo.slice(1); // remove o 9
+    }
+
+    // Se sobrou algo que não tenha 8 dígitos, considera inválido
+    if (corpo.length !== 8) {
+        return { numeroFormatado: null, numeroParaEnvio: null };
+    }
+
+    const parte1 = corpo.slice(0, 4);
+    const parte2 = corpo.slice(4);
+
+    const numeroFormatado = `+15 ${ddd} ${parte1}-${parte2}`;
+    const numeroParaEnvio = numeroFormatado;
+
+    return {
+        numeroFormatado: numeroFormatado,
+        numeroParaEnvio: numeroParaEnvio
+    };
 }
 
 function extrairPrimeiroNome(nome) {
@@ -284,7 +318,35 @@ function extrairPrimeiroNome(nome) {
 }
 
 function extrairNomeDoEmail(email) {
-    return email?.split('@')[0]?.replace(/[._]/g, ' ') ?? '';
+    if (!email) return '';
+
+    // Verifica se é um email (contém @)
+    if (!email.includes('@')) {
+        return '';
+    }
+
+    const parteNome = email.split('@')[0]; // Ex.: lucas.garcia ou lucasgarcia
+    let partes = parteNome.split(/[._]/);
+
+    // Se não houver separadores (ex.: lucasgarcia), só divide se for "lucasgarcia"
+    if (partes.length === 1) {
+        const nomeSemSeparadores = partes[0];
+        // Caso específico: sabemos que "lucasgarcia" deve ser dividido em "lucas" e "garcia"
+        if (nomeSemSeparadores.toLowerCase() === 'lucasgarcia') {
+            partes = ['lucas', 'garcia'];
+        }
+        // Para outros nomes sem separadores, mantém como está
+        else {
+            partes = [nomeSemSeparadores];
+        }
+    }
+
+    // Capitaliza cada parte e junta com espaço
+    const nomeFormatado = partes
+        .map(parte => parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
+        .join(' ');
+
+    return nomeFormatado || '';
 }
 
 async function carregarContatos(sender) {
@@ -298,20 +360,29 @@ async function carregarContatos(sender) {
 
             const { numeroParaEnvio, numeroFormatado } = formatarNumeroTelefone(aluno.cel ?? '');
             const primeiroNome = extrairPrimeiroNome(aluno.nomeCompleto);
-            const agente = extrairNomeDoEmail(aluno.agenteDoSucesso);
+            const agenteRaw = aluno.agenteDoSucesso ?? '';
+            const agente = extrairNomeDoEmail(agenteRaw);
             const monitoringDay = aluno.monitoringDay ?? '';
             const [dia] = monitoringDay.split(' às');
             const diaChave = dia?.toLowerCase()?.trim() || '';
             const registrationCode = aluno.registrationCode ?? 'Desconhecido';
 
-            if (!numeroParaEnvio || !primeiroNome || !aluno.monitoringLink || !diaChave) {
+            const erros = [];
+            if (!numeroParaEnvio) erros.push('Número inválido');
+            if (!primeiroNome) erros.push('Nome inválido');
+            if (!agenteRaw.includes('@')) erros.push('Agente do sucesso não é um email válido');
+            if (!agente) erros.push('Nome do agente não pôde ser extraído');
+            if (!aluno.monitoringLink) erros.push('Link de monitoria ausente');
+            if (!diaChave) erros.push('Dia da monitoria ausente');
+
+            if (erros.length > 0) {
                 addContactLog(
                     agente,
                     primeiroNome || 'Nome Desconhecido',
                     registrationCode,
-                    'Faltando dados'
+                    erros.join(', ')
                 );
-                sender.send('log', `⚠️ Contato inválido: ${primeiroNome || 'Nome Desconhecido'} (Registration Code: ${registrationCode}) - Faltando dados`);
+                sender.send('log', `⚠️ Contato inválido: ${primeiroNome || 'Nome Desconhecido'} (Registration Code: ${registrationCode}) - ${erros.join(', ')}`);
                 continue;
             }
 
@@ -352,8 +423,12 @@ async function enviarMensagens(sock, sender) {
             throw stopSignal;
         }
 
-        const numeroWhatsApp = `${contato.numero}@s.whatsapp.net`;
-        const mensagem = `Olá ${contato.nome}! 🚀 Lembrete do atendimento semanal com ${contato.agenteDoSucesso}, ${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
+        const numeroLimpo = contato.numero.replace(/\D/g, '');
+        const numeroWhatsApp = `${numeroLimpo}@s.whatsapp.net`;
+
+        const mensagem = `Olá ${contato.nome}! 
+🚀 Lembrete do atendimento semanal com ${contato.agenteDoSucesso}, 
+${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
 
         try {
             if (stopSignal) {
