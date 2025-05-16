@@ -480,3 +480,7 @@ process.on('unhandledRejection', (reason) => {
     console.error('Rejeição não tratada:', reason);
     sendLog(`❌ Rejeição não tratada: ${reason.message || reason}`);
 });
+
+// ...existing code...
+
+module.exports = app;
