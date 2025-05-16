@@ -17,18 +17,26 @@ const P = require('pino');
 const app = express();
 const port = process.env.PORT || 5000;
 
-// ...existing code...
+const allowedOrigins = [
+    process.env.FRONTEND_URL || 'https://seufrontend.netlify.app',
+    'http://localhost:5173', // Origem correta do frontend local
+];
+
 app.use(cors({
-    origin: [process.env.FRONTEND_URL || 'https://seufrontend.netlify.app', 'http://localhost:5173/login'],
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Origem não permitida pelo CORS'));
+        }
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-session-key'],
 }));
 
-// Adicione esta linha logo após o app.use(cors(...))
-app.options('*', cors({
-    origin: [process.env.FRONTEND_URL || 'https://seufrontend.netlify.app', 'http://localhost:5173/login'],
-    credentials: true,
-}));
-// ...existing code...
+// Lidar com requisições OPTIONS
+app.options('*', cors());
 
 app.use(express.json());
 
