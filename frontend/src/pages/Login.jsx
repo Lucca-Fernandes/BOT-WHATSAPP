@@ -10,7 +10,7 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const API_URL = 'https://bot-whatsapp-iota-orcin.vercel.app'; // URL fixa por enquanto
+    const API_URL = 'https://bot-whatsapp-kpiojn9ry-lucca021203.vercel.app';
 
     const handleSubmit = async (e) => {
         e.preventDefault();

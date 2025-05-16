@@ -32,8 +32,8 @@ function BotInterface() {
     const wsRef = useRef(null);
 
     // ...existing code...
-const API_URL = 'https://bot-whatsapp-iota-orcin.vercel.app';
-const WS_URL = 'wss://bot-whatsapp-iota-orcin.vercel.app';
+const API_URL = 'https://bot-whatsapp-kpiojn9ry-lucca021203.vercel.app';
+const WS_URL = 'wss://bot-whatsapp-kpiojn9ry-lucca021203.vercel.app';
 // ...existing code...
 
     // Configurar axios para enviar a chave de sessão em todas as requisições
