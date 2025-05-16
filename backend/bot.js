@@ -17,10 +17,18 @@ const P = require('pino');
 const app = express();
 const port = process.env.PORT || 5000;
 
+// ...existing code...
 app.use(cors({
     origin: [process.env.FRONTEND_URL || 'https://seufrontend.netlify.app', 'http://localhost:5173'],
     credentials: true,
 }));
+
+// Adicione esta linha logo após o app.use(cors(...))
+app.options('*', cors({
+    origin: [process.env.FRONTEND_URL || 'https://seufrontend.netlify.app', 'http://localhost:5173'],
+    credentials: true,
+}));
+// ...existing code...
 
 app.use(express.json());
 

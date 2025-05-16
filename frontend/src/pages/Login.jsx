@@ -10,7 +10,7 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const API_URL = 'http://localhost:5000'; // URL fixa por enquanto
+    const API_URL = 'https://bot-whatsapp-iota-orcin.vercel.app'; // URL fixa por enquanto
 
     const handleSubmit = async (e) => {
         e.preventDefault();
