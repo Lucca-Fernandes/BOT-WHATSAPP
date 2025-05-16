@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { TextField, Button, Box, Alert, CircularProgress } from '@mui/material';
 import axios from 'axios';
-import logo from '../assets/logo-horizontal-texto-preto.png';
+
+import logo from '../assets/logo-horizontal-texto-preto.png'; 
 
 function Login() {
     const [username, setUsername] = useState('');
@@ -9,7 +10,7 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const API_URL = 'https://bot-whatsapp-orcin.vercel.app';
+    const API_URL = 'http://localhost:5000'; // URL fixa por enquanto
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -20,11 +21,6 @@ function Login() {
             const response = await axios.post(`${API_URL}/login`, {
                 username,
                 password,
-            }, {
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                withCredentials: true, // Para enviar cookies, se necessário
             });
 
             const { sessionKey } = response.data;
@@ -32,7 +28,6 @@ function Login() {
             localStorage.setItem('isAuthenticated', 'true');
             window.location.href = '/bot';
         } catch (err) {
-            console.error('Erro na requisição:', err);
             setError(err.response?.data?.message || 'Erro ao fazer login');
             setIsLoading(false);
         }
@@ -62,8 +57,8 @@ function Login() {
                     src={logo}
                     alt="Logo"
                     style={{
-                        maxWidth: '230px',
-                        marginBottom: '16px',
+                        maxWidth: '230px', 
+                        marginBottom: '16px', 
                     }}
                 />
                 <form onSubmit={handleSubmit}>

@@ -17,44 +17,9 @@ const P = require('pino');
 const app = express();
 const port = process.env.PORT || 5000;
 
-const allowedOrigins = [
-    process.env.FRONTEND_URL || 'https://candid-faun-b749a1.netlify.app/',
-    'http://localhost:5173',
-];
-
-// Middleware para logar todas as requisições
-app.use((req, res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.url} de ${req.headers.origin}`);
-    next();
-});
-
-// Middleware para OPTIONS
-app.use((req, res, next) => {
-    if (req.method === 'OPTIONS') {
-        console.log(`[OPTIONS] Requisição para ${req.url}`);
-        res.setHeader('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-session-key');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Vary', 'Origin');
-        console.log('[OPTIONS] Respondendo com 200 OK');
-        return res.status(200).send();
-    }
-    next();
-});
-
-// Middleware de CORS
 app.use(cors({
-    origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Origem não permitida pelo CORS'));
-        }
-    },
+    origin: [process.env.FRONTEND_URL || 'http://localhost:3000', 'http://localhost:5173'],
     credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-session-key'],
 }));
 
 app.use(express.json());
@@ -73,16 +38,15 @@ const server = app.listen(port, () => {
 
 const wss = new WebSocketServer({ server });
 
-// Função para gerar chave de sessão
+// Função para gerar uma chave de sessão simples
 const generateSessionKey = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 };
 
-// Middleware de autenticação
+// Middleware para verificar a chave de sessão
 const authenticateSession = (req, res, next) => {
     const sessionKey = req.headers['x-session-key'];
     if (!sessionKey || !sessions.has(sessionKey)) {
-        console.log(`[AUTH] Falha na autenticação: sessionKey=${sessionKey}`);
         return res.status(401).json({ message: 'Não autorizado' });
     }
     req.sessionKey = sessionKey;
@@ -91,20 +55,17 @@ const authenticateSession = (req, res, next) => {
 
 // Rota de login
 app.post('/login', (req, res) => {
-    console.log(`[POST /login] Requisição de ${req.headers.origin}`);
     const { username, password } = req.body;
 
     const validUsername = process.env.ADMIN_USERNAME || 'admin';
     const validPassword = process.env.ADMIN_PASSWORD || '123456';
 
     if (username !== validUsername || password !== validPassword) {
-        console.log(`[POST /login] Credenciais inválidas: username=${username}`);
         return res.status(401).json({ message: 'Usuário ou senha incorretos' });
     }
 
     const sessionKey = generateSessionKey();
     sessions.set(sessionKey, { username });
-    console.log(`[POST /login] Sessão criada: ${sessionKey}`);
     res.json({ sessionKey });
 });
 
@@ -114,7 +75,7 @@ app.post('/logout', authenticateSession, (req, res) => {
     res.json({ message: 'Logout realizado com sucesso' });
 });
 
-// Rotas protegidas
+// Proteger as rotas existentes
 app.post('/start-bot', authenticateSession, (req, res) => {
     if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
     contactLogs = [];
@@ -143,7 +104,7 @@ app.get('/contact-logs', authenticateSession, (req, res) => {
     res.json(contactLogs);
 });
 
-// WebSocket
+// Proteger o WebSocket
 wss.on('connection', (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const sessionKey = url.searchParams.get('sessionKey');
@@ -172,7 +133,7 @@ const sendLog = (message) => {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Função para adicionar log de não-contato
+// Função para adicionar um log de não-contato
 const addContactLog = (agent, student, registrationCode, reason) => {
     contactLogs.push({
         agent,
@@ -311,25 +272,32 @@ async function clearSession() {
 function formatarNumeroTelefone(numero) {
     if (!numero) return { numeroFormatado: null, numeroParaEnvio: null };
 
+    // Remove qualquer coisa que não for número
     let numeroLimpo = numero.replace(/\D/g, '');
 
+    // Remove o prefixo internacional se existir (ex: +55 ou 0055)
     if (numeroLimpo.startsWith('0055')) {
         numeroLimpo = numeroLimpo.slice(4);
     } else if (numeroLimpo.startsWith('55')) {
         numeroLimpo = numeroLimpo.slice(2);
     }
 
+    // Se tiver menos de 10 dígitos, não é válido
     if (numeroLimpo.length < 10) {
         return { numeroFormatado: null, numeroParaEnvio: null };
     }
 
+    // Extrai o DDD (2 primeiros) e corpo do número
     const ddd = numeroLimpo.slice(0, 2);
     let corpo = numeroLimpo.slice(2);
 
+    // Corrige se for celular com nono dígito e DDD não exigir
+    // Se for 11 dígitos e começa com 9, vamos retirar o 9
     if (corpo.length === 9 && corpo.startsWith('9')) {
-        corpo = corpo.slice(1);
+        corpo = corpo.slice(1); // remove o 9
     }
 
+    // Se sobrou algo que não tenha 8 dígitos, considera inválido
     if (corpo.length !== 8) {
         return { numeroFormatado: null, numeroParaEnvio: null };
     }
@@ -353,22 +321,28 @@ function extrairPrimeiroNome(nome) {
 function extrairNomeDoEmail(email) {
     if (!email) return '';
 
+    // Verifica se é um email (contém @)
     if (!email.includes('@')) {
         return '';
     }
 
-    const parteNome = email.split('@')[0];
+    const parteNome = email.split('@')[0]; // Ex.: lucas.garcia ou lucasgarcia
     let partes = parteNome.split(/[._]/);
 
+    // Se não houver separadores (ex.: lucasgarcia), só divide se for "lucasgarcia"
     if (partes.length === 1) {
         const nomeSemSeparadores = partes[0];
+        // Caso específico: sabemos que "lucasgarcia" deve ser dividido em "lucas" e "garcia"
         if (nomeSemSeparadores.toLowerCase() === 'lucasgarcia') {
             partes = ['lucas', 'garcia'];
-        } else {
+        }
+        // Para outros nomes sem separadores, mantém como está
+        else {
             partes = [nomeSemSeparadores];
         }
     }
 
+    // Capitaliza cada parte e junta com espaço
     const nomeFormatado = partes
         .map(parte => parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
         .join(' ');
@@ -498,5 +472,3 @@ process.on('unhandledRejection', (reason) => {
     console.error('Rejeição não tratada:', reason);
     sendLog(`❌ Rejeição não tratada: ${reason.message || reason}`);
 });
-
-module.exports = app;

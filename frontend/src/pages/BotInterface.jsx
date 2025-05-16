@@ -1,380 +1,379 @@
 import React, { useState, useEffect, useRef } from 'react';
-   import axios from 'axios';
-   import {
-       Box,
-       Typography,
-       Button,
-       Paper,
-       Divider,
-       CircularProgress,
-       Table,
-       TableBody,
-       TableCell,
-       TableContainer,
-       TableHead,
-       TableRow,
-       Collapse,
-   } from '@mui/material';
-   import logo from '../assets/logo-horizontal-texto-preto.png';
+import axios from 'axios';
+import {
+    Box,
+    Typography,
+    Button,
+    Paper,
+    Divider,
+    CircularProgress,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
+    Collapse,
+} from '@mui/material';
 
-   function BotInterface() {
-       const [logs, setLogs] = useState([]);
-       const [isBotRunning, setIsBotRunning] = useState(false);
-       const [qrCode, setQrCode] = useState(null);
-       const [isStarting, setIsStarting] = useState(false);
-       const [isStopping, setIsStopping] = useState(false);
-       const [isClearing, setIsClearing] = useState(false);
-       const [contactLogs, setContactLogs] = useState([]);
-       const [groupedContactLogs, setGroupedContactLogs] = useState({});
-       const [selectedAgent, setSelectedAgent] = useState(null);
-       const logAreaRef = useRef(null);
-       const wsRef = useRef(null);
+import logo from '../assets/logo-horizontal-texto-preto.png'; 
 
-       const API_URL = process.env.REACT_APP_API_URL || 'https://bot-whatsapp-orcin.vercel.app';
-       const WS_URL = process.env.REACT_APP_WS_URL || 'wss://bot-whatsapp-orcin.vercel.app';
+function BotInterface() {
+    const [logs, setLogs] = useState([]);
+    const [isBotRunning, setIsBotRunning] = useState(false);
+    const [qrCode, setQrCode] = useState(null);
+    const [isStarting, setIsStarting] = useState(false);
+    const [isStopping, setIsStopping] = useState(false);
+    const [isClearing, setIsClearing] = useState(false);
+    const [contactLogs, setContactLogs] = useState([]);
+    const [groupedContactLogs, setGroupedContactLogs] = useState({});
+    const [selectedAgent, setSelectedAgent] = useState(null);
+    const logAreaRef = useRef(null);
+    const wsRef = useRef(null);
 
-       // Configurar axios para enviar a chave de sessão
-       const setupAxiosInterceptors = () => {
-           axios.interceptors.request.use(
-               (config) => {
-                   const sessionKey = localStorage.getItem('sessionKey');
-                   if (sessionKey) {
-                       config.headers['x-session-key'] = sessionKey;
-                   }
-                   config.headers['Content-Type'] = 'application/json';
-                   config.withCredentials = true;
-                   return config;
-               },
-               (error) => Promise.reject(error)
-           );
+    const API_URL = 'http://localhost:5000';
+    const WS_URL = 'ws://localhost:5000';
 
-           axios.interceptors.response.use(
-               (response) => response,
-               (error) => {
-                   if (error.response?.status === 401) {
-                       localStorage.removeItem('sessionKey');
-                       localStorage.removeItem('isAuthenticated');
-                       window.location.href = '/login';
-                   }
-                   return Promise.reject(error);
-               }
-           );
-       };
+    // Configurar axios para enviar a chave de sessão em todas as requisições
+    const setupAxiosInterceptors = () => {
+        axios.interceptors.request.use(
+            (config) => {
+                const sessionKey = localStorage.getItem('sessionKey');
+                if (sessionKey) {
+                    config.headers['x-session-key'] = sessionKey;
+                }
+                return config;
+            },
+            (error) => Promise.reject(error)
+        );
 
-       const fetchStatus = async () => {
-           try {
-               const response = await axios.get(`${API_URL}/status`);
-               setIsBotRunning(response.data.running);
-           } catch (error) {
-               console.error('Erro ao verificar status:', error);
-               setLogs((prevLogs) => [...prevLogs, `Erro ao verificar status: ${error.message}`]);
-           }
-       };
+        axios.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                if (error.response?.status === 401) {
+                    localStorage.removeItem('sessionKey');
+                    localStorage.removeItem('isAuthenticated');
+                    window.location.href = '/login';
+                }
+                return Promise.reject(error);
+            }
+        );
+    };
 
-       const fetchContactLogs = async () => {
-           try {
-               const response = await axios.get(`${API_URL}/contact-logs`);
-               setContactLogs(response.data);
-           } catch (error) {
-               console.error('Erro ao buscar logs de contatos inválidos:', error);
-               setContactLogs([]);
-           }
-       };
+    const fetchStatus = async () => {
+        try {
+            const response = await axios.get(`${API_URL}/status`);
+            setIsBotRunning(response.data.running);
+        } catch (error) {
+            console.error('Erro ao verificar status:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao verificar status: ${error.message}`]);
+        }
+    };
 
-       const groupContactLogsByAgent = (logs) => {
-           const grouped = {};
-           logs.forEach((log) => {
-               const agent = log.agent;
-               if (!grouped[agent]) {
-                   grouped[agent] = [];
-               }
-               grouped[agent].push(log);
-           });
-           return grouped;
-       };
+    const fetchContactLogs = async () => {
+        try {
+            const response = await axios.get(`${API_URL}/contact-logs`);
+            setContactLogs(response.data);
+        } catch (error) {
+            console.error('Erro ao buscar logs de contatos inválidos:', error);
+            setContactLogs([]);
+        }
+    };
 
-       const connectWebSocket = () => {
-           try {
-               const sessionKey = localStorage.getItem('sessionKey');
-               if (!sessionKey) {
-                   window.location.href = '/login';
-                   return;
-               }
+    const groupContactLogsByAgent = (logs) => {
+        const grouped = {};
+        logs.forEach((log) => {
+            const agent = log.agent;
+            if (!grouped[agent]) {
+                grouped[agent] = [];
+            }
+            grouped[agent].push(log);
+        });
+        return grouped;
+    };
 
-               const ws = new WebSocket(`${WS_URL}?sessionKey=${sessionKey}`);
-               wsRef.current = ws;
+    const connectWebSocket = () => {
+        try {
+            const sessionKey = localStorage.getItem('sessionKey');
+            if (!sessionKey) {
+                window.location.href = '/login';
+                return;
+            }
 
-               ws.onopen = () => {
-                   console.log('Conectado ao WebSocket');
-                   setLogs((prevLogs) => [...prevLogs, 'Conectado ao WebSocket']);
-               };
+            const ws = new WebSocket(`${WS_URL}?sessionKey=${sessionKey}`);
+            wsRef.current = ws;
 
-               ws.onmessage = (event) => {
-                   try {
-                       const data = JSON.parse(event.data);
-                       if (data.type === 'log') {
-                           if (data.message.startsWith('data:image')) {
-                               setQrCode(data.message);
-                               setLogs((prevLogs) => [...prevLogs, 'QR Code recebido']);
-                           } else {
-                               if (!data.message.includes('Contato inválido')) {
-                                   setLogs((prevLogs) => [...prevLogs, data.message]);
-                               }
-                               if (data.message.includes('Bot parado')) {
-                                   setIsBotRunning(false);
-                                   setQrCode(null);
-                               } else if (data.message.includes('Conectado ao WhatsApp')) {
-                                   setIsBotRunning(true);
-                               }
-                           }
-                       }
-                   } catch (error) {
-                       console.error(' JansenErro ao processar mensagem do WebSocket:', error);
-                       setLogs((prevLogs) => [...prevLogs, `Erro ao processar mensagem: ${error.message}`]);
-                   }
-               };
+            ws.onopen = () => {
+                console.log('Conectado ao WebSocket');
+                setLogs((prevLogs) => [...prevLogs, 'Conectado ao WebSocket']);
+            };
 
-               ws.onclose = () => {
-                   console.log('Desconectado do WebSocket');
-                   setLogs((prevLogs) => [...prevLogs, 'Desconectado do WebSocket']);
-               };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'log') {
+                        if (data.message.startsWith('data:image')) {
+                            setQrCode(data.message);
+                            setLogs((prevLogs) => [...prevLogs, 'QR Code recebido']);
+                        } else {
+                            if (!data.message.includes('Contato inválido')) {
+                                setLogs((prevLogs) => [...prevLogs, data.message]);
+                            }
+                            if (data.message.includes('Bot parado')) {
+                                setIsBotRunning(false);
+                                setQrCode(null);
+                            } else if (data.message.includes('Conectado ao WhatsApp')) {
+                                setIsBotRunning(true);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Erro ao processar mensagem do WebSocket:', error);
+                    setLogs((prevLogs) => [...prevLogs, `Erro ao processar mensagem: ${error.message}`]);
+                }
+            };
 
-               ws.onerror = (error) => {
-                   console.error('Erro no WebSocket:', error);
-                   setLogs((prevLogs) => [...prevLogs, `Erro no WebSocket: ${error.message || 'Erro desconhecido'}`]);
-               };
-           } catch (error) {
-               console.error('Erro ao conectar ao WebSocket:', error);
-               setLogs((prevLogs) => [...prevLogs, `Erro ao conectar ao WebSocket: ${error.message}`]);
-           }
-       };
+            ws.onclose = () => {
+                console.log('Desconectado do WebSocket');
+                setLogs((prevLogs) => [...prevLogs, 'Desconectado do WebSocket']);
+            };
 
-       useEffect(() => {
-           const isAuthenticated = localStorage.getItem('isAuthenticated');
-           if (!isAuthenticated) {
-               window.location.href = '/login';
-               return;
-           }
+            ws.onerror = (error) => {
+                console.error('Erro no WebSocket:', error);
+                setLogs((prevLogs) => [...prevLogs, `Erro no WebSocket: ${error.message || 'Erro desconhecido'}`]);
+            };
+        } catch (error) {
+            console.error('Erro ao conectar ao WebSocket:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao conectar ao WebSocket: ${error.message}`]);
+        }
+    };
 
-           setupAxiosInterceptors();
-           fetchStatus();
-           connectWebSocket();
-           fetchContactLogs();
+    useEffect(() => {
+        const isAuthenticated = localStorage.getItem('isAuthenticated');
+        if (!isAuthenticated) {
+            window.location.href = '/login';
+            return;
+        }
 
-           const interval = setInterval(fetchContactLogs, 5000);
+        setupAxiosInterceptors();
+        fetchStatus();
+        connectWebSocket();
+        fetchContactLogs();
 
-           return () => {
-               clearInterval(interval);
-               if (wsRef.current) {
-                   wsRef.current.close();
-               }
-           };
-       }, []);
+        const interval = setInterval(fetchContactLogs, 5000);
 
-       useEffect(() => {
-           if (logAreaRef.current) {
-               logAreaRef.current.scrollTop = logAreaRef.current.scrollHeight;
-           }
-       }, [logs]);
+        return () => {
+            clearInterval(interval);
+            if (wsRef.current) {
+                wsRef.current.close();
+            }
+        };
+    }, []);
 
-       useEffect(() => {
-           const grouped = groupContactLogsByAgent(contactLogs);
-           setGroupedContactLogs(grouped);
-       }, [contactLogs]);
+    useEffect(() => {
+        if (logAreaRef.current) {
+            logAreaRef.current.scrollTop = logAreaRef.current.scrollHeight;
+        }
+    }, [logs]);
 
-       const handleStartBot = async () => {
-           setIsStarting(true);
-           try {
-               const response = await axios.post(`${API_URL}/start-bot`);
-               setLogs((prevLogs) => [...prevLogs, 'Bot iniciado com sucesso']);
-           } catch (error) {
-               console.error('Erro ao iniciar o bot:', error);
-               setLogs((prevLogs) => [...prevLogs, `Erro ao iniciar o bot: ${error.response?.data?.message || error.message}`]);
-           } finally {
-               setIsStarting(false);
-               fetchStatus();
-           }
-       };
+    useEffect(() => {
+        const grouped = groupContactLogsByAgent(contactLogs);
+        setGroupedContactLogs(grouped);
+    }, [contactLogs]);
 
-       const handleStopBot = async () => {
-           if (isStopping) return;
-           setIsStopping(true);
-           try {
-               const response = await axios.post(`${API_URL}/stop-bot`);
-               setLogs((prevLogs) => [...prevLogs, 'Bot parado com sucesso']);
-           } catch (error) {
-               console.error('Erro ao parar o bot:', error);
-               setLogs((prevLogs) => [...prevLogs, `Erro ao parar o bot: ${error.response?.data?.message || error.message}`]);
-           } finally {
-               setTimeout(() => {
-                   setIsStopping(false);
-                   fetchStatus();
-               }, 1000);
-           }
-       };
+    const handleStartBot = async () => {
+        setIsStarting(true);
+        try {
+            const response = await axios.post(`${API_URL}/start-bot`);
+            setLogs((prevLogs) => [...prevLogs, 'Bot iniciado com sucesso']);
+        } catch (error) {
+            console.error('Erro ao iniciar o bot:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao iniciar o bot: ${error.response?.data?.message || error.message}`]);
+        } finally {
+            setIsStarting(false);
+            fetchStatus();
+        }
+    };
 
-       const handleClearLogs = () => {
-           setLogs([]);
-           setQrCode(null);
-       };
+    const handleStopBot = async () => {
+        if (isStopping) return;
+        setIsStopping(true);
+        try {
+            const response = await axios.post(`${API_URL}/stop-bot`);
+            setLogs((prevLogs) => [...prevLogs, 'Bot parado com sucesso']);
+        } catch (error) {
+            console.error('Erro ao parar o bot:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao parar o bot: ${error.response?.data?.message || error.message}`]);
+        } finally {
+            setTimeout(() => {
+                setIsStopping(false);
+                fetchStatus();
+            }, 1000);
+        }
+    };
 
-       const handleClearSession = async () => {
-           setIsClearing(true);
-           try {
-               const response = await axios.post(`${API_URL}/clear-session`);
-               setQrCode(null);
-               setLogs((prevLogs) => [...prevLogs, response.data.message]);
-           } catch (error) {
-               console.error('Erro ao limpar sessão:', error);
-               setLogs((prevLogs) => [...prevLogs, `Erro ao limpar sessão: ${error.response?.data?.message || error.message}`]);
-           } finally {
-               setIsClearing(false);
-               fetchStatus();
-           }
-       };
+    const handleClearLogs = () => {
+        setLogs([]);
+        setQrCode(null);
+    };
 
-       const handleLogout = async () => {
-           try {
-               await axios.post(`${API_URL}/logout`);
-               localStorage.removeItem('sessionKey');
-               localStorage.removeItem('isAuthenticated');
-               window.location.href = '/login';
-           } catch (error) {
-               console.error('Erro ao fazer logout:', error);
-               setLogs((prevLogs) => [...prevLogs, `Erro ao fazer logout: ${error.message}`]);
-           }
-       };
+    const handleClearSession = async () => {
+        setIsClearing(true);
+        try {
+            const response = await axios.post(`${API_URL}/clear-session`);
+            setQrCode(null);
+            setLogs((prevLogs) => [...prevLogs, response.data.message]);
+        } catch (error) {
+            console.error('Erro ao limpar sessão:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao limpar sessão: ${error.response?.data?.message || error.message}`]);
+        } finally {
+            setIsClearing(false);
+            fetchStatus();
+        }
+    };
 
-       const handleAgentClick = (agent) => {
-           setSelectedAgent(selectedAgent === agent ? null : agent);
-       };
+    const handleLogout = async () => {
+        try {
+            await axios.post(`${API_URL}/logout`);
+            localStorage.removeItem('sessionKey');
+            localStorage.removeItem('isAuthenticated');
+            window.location.href = '/login';
+        } catch (error) {
+            console.error('Erro ao fazer logout:', error);
+            setLogs((prevLogs) => [...prevLogs, `Erro ao fazer logout: ${error.message}`]);
+        }
+    };
 
-       return (
-           <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
-               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                   <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-                       <img
-                           src={logo}
-                           alt="Projeto Desenvolve Logo"
-                           style={{
-                               maxWidth: '240px',
-                               height: 'auto',
-                               marginBottom: '10px'
-                           }}
-                       />
-                   </Box>
-                   <Button
-                       variant="contained"
-                       color="error"
-                       onClick={handleLogout}
-                   >
-                       Sair
-                   </Button>
-               </Box>
+    const handleAgentClick = (agent) => {
+        setSelectedAgent(selectedAgent === agent ? null : agent);
+    };
 
-               <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'center' }}>
-                   <Button
-                       variant="contained"
-                       color="primary"
-                       onClick={handleStartBot}
-                       disabled={isBotRunning || isStarting || isStopping || isClearing}
-                       startIcon={isStarting ? <CircularProgress size={20} /> : null}
-                   >
-                       {isStarting ? 'Iniciando...' : 'Iniciar Bot'}
-                   </Button>
-                   <Button
-                       variant="contained"
-                       color="secondary"
-                       onClick={handleStopBot}
-                       disabled={!isBotRunning || isStarting || isStopping || isClearing}
-                       startIcon={isStopping ? <CircularProgress size={20} /> : null}
-                   >
-                       {isStopping ? 'Parando...' : 'Parar Bot'}
-                   </Button>
-                   <Button
-                       variant="outlined"
-                       color="#00000"
-                       onClick={handleClearLogs}
-                       disabled={isBotRunning || isStarting || isStopping || isClearing}
-                   >
-                       Limpar Logs
-                   </Button>
-                   <Button
-                       variant="outlined"
-                       color="#00000"
-                       onClick={handleClearSession}
-                       disabled={isStarting || isStopping || isClearing}
-                       startIcon={isClearing ? <CircularProgress size={20} /> : null}
-                   >
-                       {isClearing ? 'Limpando...' : 'Limpar Sessão'}
-                   </Button>
-               </Box>
+    return (
+        <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                    <img
+                        src={logo}
+                        alt="Projeto Desenvolve Logo"
+                        style={{
+                            maxWidth: '240px',
+                            height: 'auto',
+                            marginBottom: '10px'
+                        }}
+                    />
+                </Box>
+                <Button
+                    variant="contained"
+                    color="error"
+                    onClick={handleLogout}
+                >
+                    Sair
+                </Button>
+            </Box>
 
-               <Typography variant="body1" sx={{ textAlign: 'center', mb: 2 }}>
-                   Status: {isBotRunning ? 'Bot em execução' : 'Bot parado'}
-               </Typography>
+            <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'center' }}>
+                <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleStartBot}
+                    disabled={isBotRunning || isStarting || isStopping || isClearing}
+                    startIcon={isStarting ? <CircularProgress size={20} /> : null}
+                >
+                    {isStarting ? 'Iniciando...' : 'Iniciar Bot'}
+                </Button>
+                <Button
+                    variant="contained"
+                    color="secondary"
+                    onClick={handleStopBot}
+                    disabled={!isBotRunning || isStarting || isStopping || isClearing}
+                    startIcon={isStopping ? <CircularProgress size={20} /> : null}
+                >
+                    {isStopping ? 'Parando...' : 'Parar Bot'}
+                </Button>
+                <Button
+                    variant="outlined"
+                    color="#00000"
+                    onClick={handleClearLogs}
+                    disabled={isBotRunning || isStarting || isStopping || isClearing}
+                >
+                    Limpar Logs
+                </Button>
+                <Button
+                    variant="outlined"
+                    color="#00000"
+                    onClick={handleClearSession}
+                    disabled={isStarting || isStopping || isClearing}
+                    startIcon={isClearing ? <CircularProgress size={20} /> : null}
+                >
+                    {isClearing ? 'Limpando...' : 'Limpar Sessão'}
+                </Button>
+            </Box>
 
-               {qrCode && (
-                   <Box sx={{ textAlign: 'center', mb: 3 }}>
-                       <Typography variant="h6">Escaneie o QR Code:</Typography>
-                       <img src={qrCode} alt="QR Code" style={{ maxWidth: 200, height: 'auto' }} />
-                   </Box>
-               )}
+            <Typography variant="body1" sx={{ textAlign: 'center', mb: 2 }}>
+                Status: {isBotRunning ? 'Bot em execução' : 'Bot parado'}
+            </Typography>
 
-               <Paper sx={{ p: 2, mb: 5, maxHeight: 400, overflowY: 'auto' }} ref={logAreaRef}>
-                   <Typography variant="h6">Logs</Typography>
-                   <Divider sx={{ mb: 2 }} />
-                   {logs.map((log, index) => (
-                       <Typography key={index} variant="body2" sx={{ fontFamily: 'monospace' }}>
-                           {log}
-                       </Typography>
-                   ))}
-               </Paper>
+            {qrCode && (
+                <Box sx={{ textAlign: 'center', mb: 3 }}>
+                    <Typography variant="h6">Escaneie o QR Code:</Typography>
+                    <img src={qrCode} alt="QR Code" style={{ maxWidth: 200, height: 'auto' }} />
+                </Box>
+            )}
 
-               <Paper sx={{ p: 2, mb: 3 }}>
-                   <Typography variant="h6">Contatos Inválidos</Typography>
-                   <Divider sx={{ mb: 2 }} />
-                   {Object.keys(groupedContactLogs).length === 0 ? (
-                       <Typography variant="body2">Nenhum contato inválido registrado.</Typography>
-                   ) : (
-                       Object.keys(groupedContactLogs).map((agent) => (
-                           <Box key={agent} sx={{ mb: 2 }}>
-                               <Button
-                                   variant="contained"
-                                   color="primary"
-                                   onClick={() => handleAgentClick(agent)}
-                                   sx={{ width: '100%', textAlign: 'left' }}
-                               >
-                                   {agent} ({groupedContactLogs[agent].length} contatos inválidos)
-                               </Button>
-                               <Collapse in={selectedAgent === agent}>
-                                   <TableContainer sx={{ mt: 1 }}>
-                                       <Table>
-                                           <TableHead>
-                                               <TableRow>
-                                                   <TableCell>Aluno</TableCell>
-                                                   <TableCell>Registration Code</TableCell>
-                                                   <TableCell>Motivo</TableCell>
-                                               </TableRow>
-                                           </TableHead>
-                                           <TableBody>
-                                               {groupedContactLogs[agent].map((log, index) => (
-                                                   <TableRow key={index}>
-                                                       <TableCell>{log.student}</TableCell>
-                                                       <TableCell>{log.registrationCode}</TableCell>
-                                                       <TableCell>{log.reason}</TableCell>
-                                                   </TableRow>
-                                               ))}
-                                           </TableBody>
-                                       </Table>
-                                   </TableContainer>
-                               </Collapse>
-                           </Box>
-                       ))
-                   )}
-               </Paper>
-           </Box>
-       );
-   }
+            <Paper sx={{ p: 2, mb: 5, maxHeight: 400, overflowY: 'auto' }} ref={logAreaRef}>
+                <Typography variant="h6">Logs</Typography>
+                <Divider sx={{ mb: 2 }} />
+                {logs.map((log, index) => (
+                    <Typography key={index} variant="body2" sx={{ fontFamily: 'monospace' }}>
+                        {log}
+                    </Typography>
+                ))}
+            </Paper>
 
-   export default BotInterface;
+            <Paper sx={{ p: 2, mb: 3 }}>
+                <Typography variant="h6">Contatos Inválidos</Typography>
+                <Divider sx={{ mb: 2 }} />
+                {Object.keys(groupedContactLogs).length === 0 ? (
+                    <Typography variant="body2">Nenhum contato inválido registrado.</Typography>
+                ) : (
+                    Object.keys(groupedContactLogs).map((agent) => (
+                        <Box key={agent} sx={{ mb: 2 }}>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                onClick={() => handleAgentClick(agent)}
+                                sx={{ width: '100%', textAlign: 'left' }}
+                            >
+                                {agent} ({groupedContactLogs[agent].length} contatos inválidos)
+                            </Button>
+                            <Collapse in={selectedAgent === agent}>
+                                <TableContainer sx={{ mt: 1 }}>
+                                    <Table>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>Aluno</TableCell>
+                                                <TableCell>Registration Code</TableCell>
+                                                <TableCell>Motivo</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {groupedContactLogs[agent].map((log, index) => (
+                                                <TableRow key={index}>
+                                                    <TableCell>{log.student}</TableCell>
+                                                    <TableCell>{log.registrationCode}</TableCell>
+                                                    <TableCell>{log.reason}</TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            </Collapse>
+                        </Box>
+                    ))
+                )}
+            </Paper>
+        </Box>
+    );
+}
+
+export default BotInterface;
