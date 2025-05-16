@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { TextField, Button, Box, Alert, CircularProgress } from '@mui/material';
 import axios from 'axios';
-
-import logo from '../assets/logo-horizontal-texto-preto.png'; 
+import logo from '../assets/logo-horizontal-texto-preto.png';
 
 function Login() {
     const [username, setUsername] = useState('');
@@ -12,22 +11,30 @@ function Login() {
 
     const API_URL = 'https://bot-whatsapp-rho.vercel.app';
 
-const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setIsLoading(true);
 
-    try {
-        const response = await axios.post(`${API_URL}/login`, {
-            username,
-            password,
-        });
-        // ... restante do código ...
-    } catch (err) {
-        setError(err.response?.data?.message || 'Erro ao fazer login');
-        setIsLoading(false);
-    }
-};
+        try {
+            const response = await axios.post(`${API_URL}/login`, {
+                username,
+                password,
+            }, {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            const { sessionKey } = response.data;
+            localStorage.setItem('sessionKey', sessionKey);
+            localStorage.setItem('isAuthenticated', 'true');
+            window.location.href = '/bot';
+        } catch (err) {
+            setError(err.response?.data?.message || 'Erro ao fazer login');
+            setIsLoading(false);
+        }
+    };
 
     return (
         <Box
@@ -53,8 +60,8 @@ const handleSubmit = async (e) => {
                     src={logo}
                     alt="Logo"
                     style={{
-                        maxWidth: '230px', 
-                        marginBottom: '16px', 
+                        maxWidth: '230px',
+                        marginBottom: '16px',
                     }}
                 />
                 <form onSubmit={handleSubmit}>

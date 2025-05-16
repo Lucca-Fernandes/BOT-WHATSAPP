@@ -19,20 +19,25 @@ const port = process.env.PORT || 5000;
 
 const allowedOrigins = [
     process.env.FRONTEND_URL || 'https://seufrontend.netlify.app',
-    'http://localhost:5173', // Origem correta do frontend local
+    'http://localhost:5173',
 ];
 
+// Middleware para OPTIONS (primeiro no pipeline)
 app.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
-        res.header('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : false);
-        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type, x-session-key');
-        res.header('Access-Control-Allow-Credentials', 'true');
-        return res.status(200).end();
+        console.log(`[OPTIONS] Requisição para ${req.url} de ${req.headers.origin}`);
+        res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-session-key');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Vary', 'Origin');
+        console.log('[OPTIONS] Respondendo com 200 OK');
+        return res.status(200).send();
     }
     next();
 });
 
+// Middleware de CORS
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin)) {
@@ -45,10 +50,6 @@ app.use(cors({
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-session-key'],
 }));
-
-app.options('*', cors());
-// Lidar com requisições OPTIONS
-app.options('*', cors());
 
 app.use(express.json());
 
@@ -66,20 +67,44 @@ const server = app.listen(port, () => {
 
 const wss = new WebSocketServer({ server });
 
-// Função para gerar uma chave de sessão simples
+// Função para gerar chave de sessão
 const generateSessionKey = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 };
 
-// Middleware para verificar a chave de sessão
+// Middleware de autenticação
 const authenticateSession = (req, res, next) => {
     const sessionKey = req.headers['x-session-key'];
     if (!sessionKey || !sessions.has(sessionKey)) {
+        console.log(`[AUTH] Falha na autenticação: sessionKey=${sessionKey}`);
         return res.status(401).json({ message: 'Não autorizado' });
     }
     req.sessionKey = sessionKey;
     next();
 };
+
+// Rota de login
+app.post('/login', (req, res) => {
+    console.log(`[POST /login] Requisição de ${req.headers.origin}`);
+    const { username, password } = req.body;
+
+    const validUsername = process.env.ADMIN_USERNAME || 'admin';
+    const validPassword = process.env.ADMIN_PASSWORD || '123456';
+
+    if (username !== validUsername || password !== validPassword) {
+        console.log(`[POST /login] Credenciais inválidas: username=${username}`);
+        return res.status(401).json({ message: 'Usuário ou senha incorretos' });
+    }
+
+    const sessionKey = generateSessionKey();
+    sessions.set(sessionKey, { username });
+    console.log(`[POST /login] Sessão criada: ${sessionKey}`);
+    res.json({ sessionKey });
+});
+
+// ... restante do código inalterado ...
+
+module.exports = app;
 
 // Rota de login
 app.post('/login', (req, res) => {
@@ -503,4 +528,3 @@ process.on('unhandledRejection', (reason) => {
 
 // ...existing code...
 
-module.exports = app;
