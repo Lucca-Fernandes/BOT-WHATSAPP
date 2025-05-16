@@ -10,28 +10,24 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const API_URL = 'https://bot-whatsapp-rho.vercel.app/';
+    const API_URL = 'https://bot-whatsapp-rho.vercel.app';
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
-        setIsLoading(true);
+const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
 
-        try {
-            const response = await axios.post(`${API_URL}/login`, {
-                username,
-                password,
-            });
-
-            const { sessionKey } = response.data;
-            localStorage.setItem('sessionKey', sessionKey);
-            localStorage.setItem('isAuthenticated', 'true');
-            window.location.href = '/bot';
-        } catch (err) {
-            setError(err.response?.data?.message || 'Erro ao fazer login');
-            setIsLoading(false);
-        }
-    };
+    try {
+        const response = await axios.post(`${API_URL}/login`, {
+            username,
+            password,
+        });
+        // ... restante do código ...
+    } catch (err) {
+        setError(err.response?.data?.message || 'Erro ao fazer login');
+        setIsLoading(false);
+    }
+};
 
     return (
         <Box

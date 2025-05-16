@@ -31,10 +31,8 @@ function BotInterface() {
     const logAreaRef = useRef(null);
     const wsRef = useRef(null);
 
-    // ...existing code...
-const API_URL = 'https://bot-whatsapp-rho.vercel.app/';
-const WS_URL = 'wss://bot-whatsapp-rho.vercel.app/';
-// ...existing code...
+ const API_URL = 'https://bot-whatsapp-rho.vercel.app';
+const WS_URL = 'wss://bot-whatsapp-rho.vercel.app';
 
     // Configurar axios para enviar a chave de sessão em todas as requisições
     const setupAxiosInterceptors = () => {
