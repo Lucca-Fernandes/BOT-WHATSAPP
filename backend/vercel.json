@@ -1,13 +1,4 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "./bot.js",
-      "use": "@vercel/node"
-    }
-  ],
-
-
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [

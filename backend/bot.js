@@ -22,6 +22,17 @@ const allowedOrigins = [
     'http://localhost:5173', // Origem correta do frontend local
 ];
 
+app.use((req, res, next) => {
+    if (req.method === 'OPTIONS') {
+        res.header('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : false);
+        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, x-session-key');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        return res.status(200).end();
+    }
+    next();
+});
+
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin)) {
@@ -35,6 +46,7 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'x-session-key'],
 }));
 
+app.options('*', cors());
 // Lidar com requisições OPTIONS
 app.options('*', cors());
 
