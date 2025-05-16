@@ -18,13 +18,18 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 const allowedOrigins = [
-    process.env.FRONTEND_URL || 'https://seufrontend.netlify.app',
+    process.env.FRONTEND_URL || 'https://candid-faun-b749a1.netlify.app/',
     'http://localhost:5173',
 ];
 
-// Middleware para OPTIONS
+// Middleware para logar todas as requisições
 app.use((req, res, next) => {
     console.log(`[REQUEST] ${req.method} ${req.url} de ${req.headers.origin}`);
+    next();
+});
+
+// Middleware para OPTIONS
+app.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
         console.log(`[OPTIONS] Requisição para ${req.url}`);
         res.setHeader('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '*');
@@ -103,16 +108,13 @@ app.post('/login', (req, res) => {
     res.json({ sessionKey });
 });
 
-// ... restante do código inalterado ...
-
-module.exports = app;
 // Rota de logout
 app.post('/logout', authenticateSession, (req, res) => {
     sessions.delete(req.sessionKey);
     res.json({ message: 'Logout realizado com sucesso' });
 });
 
-// Proteger as rotas existentes
+// Rotas protegidas
 app.post('/start-bot', authenticateSession, (req, res) => {
     if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
     contactLogs = [];
@@ -141,7 +143,7 @@ app.get('/contact-logs', authenticateSession, (req, res) => {
     res.json(contactLogs);
 });
 
-// Proteger o WebSocket
+// WebSocket
 wss.on('connection', (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const sessionKey = url.searchParams.get('sessionKey');
@@ -170,7 +172,7 @@ const sendLog = (message) => {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Função para adicionar um log de não-contato
+// Função para adicionar log de não-contato
 const addContactLog = (agent, student, registrationCode, reason) => {
     contactLogs.push({
         agent,
@@ -309,32 +311,25 @@ async function clearSession() {
 function formatarNumeroTelefone(numero) {
     if (!numero) return { numeroFormatado: null, numeroParaEnvio: null };
 
-    // Remove qualquer coisa que não for número
     let numeroLimpo = numero.replace(/\D/g, '');
 
-    // Remove o prefixo internacional se existir (ex: +55 ou 0055)
     if (numeroLimpo.startsWith('0055')) {
         numeroLimpo = numeroLimpo.slice(4);
     } else if (numeroLimpo.startsWith('55')) {
         numeroLimpo = numeroLimpo.slice(2);
     }
 
-    // Se tiver menos de 10 dígitos, não é válido
     if (numeroLimpo.length < 10) {
         return { numeroFormatado: null, numeroParaEnvio: null };
     }
 
-    // Extrai o DDD (2 primeiros) e corpo do número
     const ddd = numeroLimpo.slice(0, 2);
     let corpo = numeroLimpo.slice(2);
 
-    // Corrige se for celular com nono dígito e DDD não exigir
-    // Se for 11 dígitos e começa com 9, vamos retirar o 9
     if (corpo.length === 9 && corpo.startsWith('9')) {
-        corpo = corpo.slice(1); // remove o 9
+        corpo = corpo.slice(1);
     }
 
-    // Se sobrou algo que não tenha 8 dígitos, considera inválido
     if (corpo.length !== 8) {
         return { numeroFormatado: null, numeroParaEnvio: null };
     }
@@ -358,28 +353,22 @@ function extrairPrimeiroNome(nome) {
 function extrairNomeDoEmail(email) {
     if (!email) return '';
 
-    // Verifica se é um email (contém @)
     if (!email.includes('@')) {
         return '';
     }
 
-    const parteNome = email.split('@')[0]; // Ex.: lucas.garcia ou lucasgarcia
+    const parteNome = email.split('@')[0];
     let partes = parteNome.split(/[._]/);
 
-    // Se não houver separadores (ex.: lucasgarcia), só divide se for "lucasgarcia"
     if (partes.length === 1) {
         const nomeSemSeparadores = partes[0];
-        // Caso específico: sabemos que "lucasgarcia" deve ser dividido em "lucas" e "garcia"
         if (nomeSemSeparadores.toLowerCase() === 'lucasgarcia') {
             partes = ['lucas', 'garcia'];
-        }
-        // Para outros nomes sem separadores, mantém como está
-        else {
+        } else {
             partes = [nomeSemSeparadores];
         }
     }
 
-    // Capitaliza cada parte e junta com espaço
     const nomeFormatado = partes
         .map(parte => parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
         .join(' ');
@@ -510,5 +499,4 @@ process.on('unhandledRejection', (reason) => {
     sendLog(`❌ Rejeição não tratada: ${reason.message || reason}`);
 });
 
-// ...existing code...
-
+module.exports = app;

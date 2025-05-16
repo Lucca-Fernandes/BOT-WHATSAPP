@@ -9,7 +9,7 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const API_URL = 'https://bot-whatsapp-rho.vercel.app';
+    const API_URL = 'https://bot-whatsapp-orcin.vercel.app';
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -24,6 +24,7 @@ function Login() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                withCredentials: true, // Para enviar cookies, se necessário
             });
 
             const { sessionKey } = response.data;
@@ -31,6 +32,7 @@ function Login() {
             localStorage.setItem('isAuthenticated', 'true');
             window.location.href = '/bot';
         } catch (err) {
+            console.error('Erro na requisição:', err);
             setError(err.response?.data?.message || 'Erro ao fazer login');
             setIsLoading(false);
         }
