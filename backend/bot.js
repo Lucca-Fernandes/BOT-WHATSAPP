@@ -305,7 +305,7 @@ function formatarNumeroTelefone(numero) {
     const parte1 = corpo.slice(0, 4);
     const parte2 = corpo.slice(4);
 
-    const numeroFormatado = `+15 ${ddd} ${parte1}-${parte2}`;
+    const numeroFormatado = `+55 ${ddd} ${parte1}-${parte2}`;
     const numeroParaEnvio = numeroFormatado;
 
     return {
