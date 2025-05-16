@@ -1,29 +1,31 @@
 {
   "cleanUrls": true,
   "trailingSlash": false,
-  "routes": [
+  "headers": [
     {
-      "src": "/(.*)",
-      "methods": ["OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "http://localhost:5173",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,x-session-key",
-        "Access-Control-Allow-Credentials": "true",
-        "Vary": "Origin"
-      },
-      "status": 200
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.js",
-      "headers": {
-        "Access-Control-Allow-Origin": "http://localhost:5173",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type,x-session-key",
-        "Access-Control-Allow-Credentials": "true",
-        "Vary": "Origin"
-      }
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "http://localhost:5173"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET,POST,OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type,x-session-key"
+        },
+        {
+          "key": "Access-Control-Allow-Credentials",
+          "value": "true"
+        },
+        {
+          "key": "Vary",
+          "value": "Origin"
+        }
+      ]
     }
   ]
 }

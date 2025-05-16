@@ -22,11 +22,12 @@ const allowedOrigins = [
     'http://localhost:5173',
 ];
 
-// Middleware para OPTIONS (primeiro no pipeline)
+// Middleware para OPTIONS
 app.use((req, res, next) => {
+    console.log(`[REQUEST] ${req.method} ${req.url} de ${req.headers.origin}`);
     if (req.method === 'OPTIONS') {
-        console.log(`[OPTIONS] Requisição para ${req.url} de ${req.headers.origin}`);
-        res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+        console.log(`[OPTIONS] Requisição para ${req.url}`);
+        res.setHeader('Access-Control-Allow-Origin', allowedOrigins.includes(req.headers.origin) ? req.headers.origin : '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-session-key');
         res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -105,23 +106,6 @@ app.post('/login', (req, res) => {
 // ... restante do código inalterado ...
 
 module.exports = app;
-
-// Rota de login
-app.post('/login', (req, res) => {
-    const { username, password } = req.body;
-
-    const validUsername = process.env.ADMIN_USERNAME || 'admin';
-    const validPassword = process.env.ADMIN_PASSWORD || '123456';
-
-    if (username !== validUsername || password !== validPassword) {
-        return res.status(401).json({ message: 'Usuário ou senha incorretos' });
-    }
-
-    const sessionKey = generateSessionKey();
-    sessions.set(sessionKey, { username });
-    res.json({ sessionKey });
-});
-
 // Rota de logout
 app.post('/logout', authenticateSession, (req, res) => {
     sessions.delete(req.sessionKey);
