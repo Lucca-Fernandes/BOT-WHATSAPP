@@ -455,7 +455,7 @@ ${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink
         }
 
         sender.send('log', `⏳ Aguardando 20s...`);
-        await delay(20000);
+        await delay(40000);
     }
 
     if (!stopSignal) {
