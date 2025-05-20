@@ -16,7 +16,8 @@ import {
     Collapse,
 } from '@mui/material';
 
-import logo from '../assets/logo-horizontal-texto-preto.png'; 
+import logo from '../assets/logo-horizontal-texto-preto.png';
+import BuscarAluno from '../components/BuscarAluno';
 
 function BotInterface() {
     const [logs, setLogs] = useState([]);
@@ -329,6 +330,9 @@ function BotInterface() {
                     </Typography>
                 ))}
             </Paper>
+
+            {/* Inserir o componente BuscarAluno */}
+            <BuscarAluno apiUrl={API_URL} />
 
             <Paper sx={{ p: 2, mb: 3 }}>
                 <Typography variant="h6">Contatos Inválidos</Typography>

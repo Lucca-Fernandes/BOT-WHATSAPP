@@ -21,7 +21,6 @@ app.use(cors({
     origin: [process.env.FRONTEND_URL || 'http://localhost:3000', 'http://localhost:5173'],
     credentials: true,
 }));
-
 app.use(express.json());
 
 let botRunning = false;
@@ -102,6 +101,28 @@ app.post('/clear-session', authenticateSession, async (req, res) => {
 
 app.get('/contact-logs', authenticateSession, (req, res) => {
     res.json(contactLogs);
+});
+
+// Rota para buscar alunos por nome
+app.get('/search-students', authenticateSession, async (req, res) => {
+    const { name } = req.query;
+    try {
+        const alunos = await fetchEnrolled();
+        // Deduplicar os alunos com base no registrationCode
+        const uniqueAlunos = Array.from(
+            new Map(alunos.map(aluno => [aluno.registrationCode, aluno])).values()
+        );
+        if (!name) {
+            return res.json(uniqueAlunos);
+        }
+        const filteredAlunos = uniqueAlunos.filter(aluno =>
+            aluno.nomeCompleto.toLowerCase().includes(name.toLowerCase())
+        );
+        res.json(filteredAlunos);
+    } catch (error) {
+        console.error('Erro ao buscar alunos:', error);
+        res.status(500).json({ message: 'Erro ao buscar alunos', error: error.message });
+    }
 });
 
 // Proteger o WebSocket
@@ -272,32 +293,25 @@ async function clearSession() {
 function formatarNumeroTelefone(numero) {
     if (!numero) return { numeroFormatado: null, numeroParaEnvio: null };
 
-    // Remove qualquer coisa que não for número
     let numeroLimpo = numero.replace(/\D/g, '');
 
-    // Remove o prefixo internacional se existir (ex: +55 ou 0055)
     if (numeroLimpo.startsWith('0055')) {
         numeroLimpo = numeroLimpo.slice(4);
     } else if (numeroLimpo.startsWith('55')) {
         numeroLimpo = numeroLimpo.slice(2);
     }
 
-    // Se tiver menos de 10 dígitos, não é válido
     if (numeroLimpo.length < 10) {
         return { numeroFormatado: null, numeroParaEnvio: null };
     }
 
-    // Extrai o DDD (2 primeiros) e corpo do número
     const ddd = numeroLimpo.slice(0, 2);
     let corpo = numeroLimpo.slice(2);
 
-    // Corrige se for celular com nono dígito e DDD não exigir
-    // Se for 11 dígitos e começa com 9, vamos retirar o 9
     if (corpo.length === 9 && corpo.startsWith('9')) {
-        corpo = corpo.slice(1); // remove o 9
+        corpo = corpo.slice(1);
     }
 
-    // Se sobrou algo que não tenha 8 dígitos, considera inválido
     if (corpo.length !== 8) {
         return { numeroFormatado: null, numeroParaEnvio: null };
     }
@@ -321,28 +335,22 @@ function extrairPrimeiroNome(nome) {
 function extrairNomeDoEmail(email) {
     if (!email) return '';
 
-    // Verifica se é um email (contém @)
     if (!email.includes('@')) {
         return '';
     }
 
-    const parteNome = email.split('@')[0]; // Ex.: lucas.garcia ou lucasgarcia
+    const parteNome = email.split('@')[0];
     let partes = parteNome.split(/[._]/);
 
-    // Se não houver separadores (ex.: lucasgarcia), só divide se for "lucasgarcia"
     if (partes.length === 1) {
         const nomeSemSeparadores = partes[0];
-        // Caso específico: sabemos que "lucasgarcia" deve ser dividido em "lucas" e "garcia"
         if (nomeSemSeparadores.toLowerCase() === 'lucasgarcia') {
             partes = ['lucas', 'garcia'];
-        }
-        // Para outros nomes sem separadores, mantém como está
-        else {
+        } else {
             partes = [nomeSemSeparadores];
         }
     }
 
-    // Capitaliza cada parte e junta com espaço
     const nomeFormatado = partes
         .map(parte => parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
         .join(' ');
