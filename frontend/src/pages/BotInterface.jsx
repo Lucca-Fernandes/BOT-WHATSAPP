@@ -31,8 +31,8 @@ function BotInterface() {
     const logAreaRef = useRef(null);
     const wsRef = useRef(null);
 
-    const API_URL = 'https://bot-whatsapp-1-yu8c.onrender.com';
-    const WS_URL = 'wss://bot-whatsapp-1-yu8c.onrender.com';
+    const API_URL = 'http://localhost:5000';
+    const WS_URL = 'ws://localhost:5000';
 
     // Configurar axios para enviar a chave de sessão em todas as requisições
     const setupAxiosInterceptors = () => {
