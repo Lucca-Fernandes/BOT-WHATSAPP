@@ -454,7 +454,7 @@ ${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink
             sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado} (Registration Code: ${contato.registrationCode}): ${err.message}`);
         }
 
-        sender.send('log', `⏳ Aguardando 20s...`);
+        sender.send('log', `⏳ Aguardando 40s...`);
         await delay(40000);
     }
 
