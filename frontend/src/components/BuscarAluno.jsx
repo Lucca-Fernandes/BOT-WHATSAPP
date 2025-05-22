@@ -37,22 +37,41 @@ function BuscarAluno({ apiUrl }) {
         }
     };
 
+    // Função para extrair os últimos 4 dígitos do telefone
+    const getLastFourDigits = (phone) => {
+        if (!phone) return '';
+        const cleanPhone = phone.replace(/\D/g, ''); // Remove caracteres não numéricos
+        return cleanPhone.slice(-4);
+    };
+
+    // Função de filtragem considerando múltiplos campos
+    const filterStudents = (query) => {
+        if (query.trim() === '') {
+            setFilteredStudents([]);
+            return;
+        }
+
+        const normalizedQuery = query.toLowerCase();
+        const filtered = allStudents.filter(student => {
+            const lastFourDigits = getLastFourDigits(student.cel);
+            return (
+                student.nomeCompleto?.toLowerCase().includes(normalizedQuery) ||
+                student.registrationCode?.toLowerCase().includes(normalizedQuery) ||
+                student.emailPd?.toLowerCase().includes(normalizedQuery) ||
+                lastFourDigits.includes(normalizedQuery)
+            );
+        });
+
+        // Deduplicar os filtrados
+        const uniqueFiltered = Array.from(
+            new Map(filtered.map(student => [student.registrationCode, student])).values()
+        );
+        setFilteredStudents(uniqueFiltered);
+    };
+
     // Função de filtragem com debounce
     const debouncedFilterStudents = useMemo(() => {
-        return debounce((query) => {
-            if (query.trim() === '') {
-                setFilteredStudents([]);
-            } else {
-                const filtered = allStudents.filter(student =>
-                    student.nomeCompleto.toLowerCase().includes(query.toLowerCase())
-                );
-                // Deduplicar os filtrados (caso haja algum problema nos dados)
-                const uniqueFiltered = Array.from(
-                    new Map(filtered.map(student => [student.registrationCode, student])).values()
-                );
-                setFilteredStudents(uniqueFiltered);
-            }
-        }, 300); // Atraso de 300ms
+        return debounce(filterStudents, 300); // Atraso de 300ms
     }, [allStudents]);
 
     // Atualizar a busca quando o searchQuery mudar
@@ -95,7 +114,7 @@ function BuscarAluno({ apiUrl }) {
             <TextField
                 fullWidth
                 variant="outlined"
-                placeholder="Digite o nome do aluno"
+                placeholder="Digite nome, matrícula, email ou últimos 4 dígitos do telefone"
                 value={searchQuery}
                 onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -139,7 +158,7 @@ function BuscarAluno({ apiUrl }) {
             {/* Mensagem quando não há resultados */}
             {!selectedStudent && searchQuery && displayedStudents.length === 0 && (
                 <Typography variant="body1" sx={{ textAlign: 'center', mb: 3 }}>
-                    Nenhum aluno encontrado com o nome "{searchQuery}".
+                    Nenhum aluno encontrado com "{searchQuery}".
                 </Typography>
             )}
 
