@@ -429,7 +429,8 @@ async function enviarMensagens(sock, sender) {
 
         const mensagem = `Olá ${contato.nome}! 
 🚀 Lembrete do atendimento semanal com ${contato.agenteDoSucesso}, 
-${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
+${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}
+\n\n*Caso não consiga participar ou queira reportar qualquer problema entre em contato diretamente com seu Agente de Sucesso, este número não recebe mensagens! 🚀*`;
 
         try {
             if (stopSignal) {
