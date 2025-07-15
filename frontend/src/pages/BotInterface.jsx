@@ -8,16 +8,17 @@ import {
     Divider,
     CircularProgress,
     Table,
-    TableBody,
-    TableCell,
     TableContainer,
     TableHead,
     TableRow,
+    TableCell,
+    TableBody,
     Collapse,
 } from '@mui/material';
 
 import logo from '../assets/logo-horizontal-texto-preto.png';
 import BuscarAluno from '../components/BuscarAluno';
+import MessageStats from '../components/MessageStats';
 
 function BotInterface() {
     const [logs, setLogs] = useState([]);
@@ -29,13 +30,14 @@ function BotInterface() {
     const [contactLogs, setContactLogs] = useState([]);
     const [groupedContactLogs, setGroupedContactLogs] = useState({});
     const [selectedAgent, setSelectedAgent] = useState(null);
+    const [isLoadingContacts, setIsLoadingContacts] = useState(true);
+    const [isInvalidContactsExpanded, setIsInvalidContactsExpanded] = useState(false);
     const logAreaRef = useRef(null);
     const wsRef = useRef(null);
 
     const API_URL = 'http://localhost:5000';
     const WS_URL = 'ws://localhost:5000';
 
-    // Configurar axios para enviar a chave de sessão em todas as requisições
     const setupAxiosInterceptors = () => {
         axios.interceptors.request.use(
             (config) => {
@@ -72,12 +74,15 @@ function BotInterface() {
     };
 
     const fetchContactLogs = async () => {
+        setIsLoadingContacts(true);
         try {
             const response = await axios.get(`${API_URL}/contact-logs`);
             setContactLogs(response.data);
         } catch (error) {
             console.error('Erro ao buscar logs de contatos inválidos:', error);
             setContactLogs([]);
+        } finally {
+            setIsLoadingContacts(false);
         }
     };
 
@@ -158,13 +163,10 @@ function BotInterface() {
 
         setupAxiosInterceptors();
         fetchStatus();
-        connectWebSocket();
         fetchContactLogs();
-
-        const interval = setInterval(fetchContactLogs, 5000);
+        connectWebSocket();
 
         return () => {
-            clearInterval(interval);
             if (wsRef.current) {
                 wsRef.current.close();
             }
@@ -249,6 +251,10 @@ function BotInterface() {
         setSelectedAgent(selectedAgent === agent ? null : agent);
     };
 
+    const handleInvalidContactsToggle = () => {
+        setIsInvalidContactsExpanded(!isInvalidContactsExpanded);
+    };
+
     return (
         <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -331,51 +337,63 @@ function BotInterface() {
                 ))}
             </Paper>
 
-            {/* Inserir o componente BuscarAluno */}
             <BuscarAluno apiUrl={API_URL} />
 
             <Paper sx={{ p: 2, mb: 3 }}>
-                <Typography variant="h6">Contatos Inválidos</Typography>
-                <Divider sx={{ mb: 2 }} />
-                {Object.keys(groupedContactLogs).length === 0 ? (
-                    <Typography variant="body2">Nenhum contato inválido registrado.</Typography>
-                ) : (
-                    Object.keys(groupedContactLogs).map((agent) => (
-                        <Box key={agent} sx={{ mb: 2 }}>
-                            <Button
-                                variant="contained"
-                                color="primary"
-                                onClick={() => handleAgentClick(agent)}
-                                sx={{ width: '100%', textAlign: 'left' }}
-                            >
-                                {agent} ({groupedContactLogs[agent].length} contatos inválidos)
-                            </Button>
-                            <Collapse in={selectedAgent === agent}>
-                                <TableContainer sx={{ mt: 1 }}>
-                                    <Table>
-                                        <TableHead>
-                                            <TableRow>
-                                                <TableCell>Aluno</TableCell>
-                                                <TableCell>Registration Code</TableCell>
-                                                <TableCell>Motivo</TableCell>
-                                            </TableRow>
-                                        </TableHead>
-                                        <TableBody>
-                                            {groupedContactLogs[agent].map((log, index) => (
-                                                <TableRow key={index}>
-                                                    <TableCell>{log.student}</TableCell>
-                                                    <TableCell>{log.registrationCode}</TableCell>
-                                                    <TableCell>{log.reason}</TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </TableContainer>
-                            </Collapse>
+                <Box
+                    onClick={handleInvalidContactsToggle}
+                    sx={{ cursor: 'pointer', p: 1, bgcolor: isInvalidContactsExpanded ? '#f5f5f5' : 'inherit' }}
+                >
+                    <Typography variant="h6">Contatos Inválidos</Typography>
+                </Box>
+                <Collapse in={isInvalidContactsExpanded}>
+                    <Divider sx={{ mb: 2 }} />
+                    {isLoadingContacts ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                            <CircularProgress />
                         </Box>
-                    ))
-                )}
+                    ) : Object.keys(groupedContactLogs).length === 0 ? (
+                        <Typography variant="body2">Nenhum contato inválido registrado.</Typography>
+                    ) : (
+                        Object.keys(groupedContactLogs).map((agent) => (
+                            <Box key={agent} sx={{ mb: 2 }}>
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    onClick={() => handleAgentClick(agent)}
+                                    sx={{ width: '100%', textAlign: 'left' }}
+                                >
+                                    {agent} ({groupedContactLogs[agent].length} contatos inválidos)
+                                </Button>
+                                <Collapse in={selectedAgent === agent}>
+                                    <TableContainer sx={{ mt: 1 }}>
+                                        <Table>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell>Aluno</TableCell>
+                                                    <TableCell>Registration Code</TableCell>
+                                                    <TableCell>Motivo</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {groupedContactLogs[agent].map((log, index) => (
+                                                    <TableRow key={index}>
+                                                        <TableCell>{log.student}</TableCell>
+                                                        <TableCell>{log.registrationCode}</TableCell>
+                                                        <TableCell>{log.reason}</TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                </Collapse>
+                            </Box>
+                        ))
+                    )}
+                </Collapse>
             </Paper>
+
+            <MessageStats />
         </Box>
     );
 }
