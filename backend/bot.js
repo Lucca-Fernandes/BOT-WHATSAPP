@@ -317,10 +317,12 @@ async function startBot(sender) {
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update) => {
+            console.log('Conexão atualizada:', update); // Depuração
             const { connection, lastDisconnect, qr, isNewLogin } = update;
 
             if (qr) {
                 const qrCodeUrl = await qrcode.toDataURL(qr);
+                console.log('QR Code gerado:', qrCodeUrl); // Depuração
                 sender.send('qr', qrCodeUrl);
                 sender.send('log', '📱 QR Code gerado. Escaneie com seu WhatsApp.');
             }
@@ -335,16 +337,20 @@ async function startBot(sender) {
             } else if (connection === 'close') {
                 const errorMessage = lastDisconnect?.error?.message || 'Motivo desconhecido';
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
+                console.log(`Conexão fechada: ${errorMessage} (Código: ${statusCode})`); // Depuração
                 sender.send('log', `❌ Conexão fechada: ${errorMessage} (Código: ${statusCode})`);
 
                 if (statusCode === DisconnectReason.loggedOut) {
                     sender.send('log', '❌ Sessão expirada. Use "Limpar Sessão" para gerar um novo QR Code.');
                     await clearSession();
                     await stopBot();
-                } else {
+                } else if (statusCode !== DisconnectReason.restartRequired) {
                     sender.send('log', '🔄 Tentando reconectar...');
                     await stopBot();
-                    startBot(sender);
+                    startBot(sender); // Tenta reconectar apenas se não for reinício forçado
+                } else {
+                    sender.send('log', '🔄 Reinício necessário detectado. Aguardando nova tentativa...');
+                    await stopBot();
                 }
             }
         });
@@ -358,6 +364,7 @@ async function startBot(sender) {
             }
         });
     } catch (err) {
+        console.error('Erro ao iniciar bot:', err); // Depuração
         sender.send('log', `❌ Erro ao iniciar bot: ${err.message}`);
         await stopBot();
     }
