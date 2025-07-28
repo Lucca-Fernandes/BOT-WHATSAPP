@@ -280,8 +280,18 @@ async function startBot(sender) {
     sender.send('log', 'Iniciando o bot...');
 
     try {
+        // Verificar o estado da pasta auth_info
+        const authExists = await fs.access('auth_info').then(() => true).catch(() => false);
+        sender.send('log', `ℹ️ Pasta auth_info existe? ${authExists}`);
+
         const { state, saveCreds } = await useMultiFileAuthState('auth_info');
         const { version } = await fetchLatestBaileysVersion();
+
+        // Verificar se há credenciais válidas
+        const hasValidCreds = state && state.creds && state.creds.me;
+        if (!hasValidCreds) {
+            sender.send('log', 'ℹ️ Nenhuma sessão válida encontrada. Forçando geração de QR code...');
+        }
 
         sock = makeWASocket({
             version,
@@ -317,18 +327,18 @@ async function startBot(sender) {
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update) => {
-            console.log('Conexão atualizada:', update); // Depuração
+            console.log('Conexão atualizada:', JSON.stringify(update, null, 2));
             const { connection, lastDisconnect, qr, isNewLogin } = update;
 
             if (qr) {
                 const qrCodeUrl = await qrcode.toDataURL(qr);
-                console.log('QR Code gerado:', qrCodeUrl); // Depuração
+                console.log('QR Code gerado:', qrCodeUrl);
                 sender.send('qr', qrCodeUrl);
                 sender.send('log', '📱 QR Code gerado. Escaneie com seu WhatsApp.');
             }
 
             if (isNewLogin) {
-                sender.send('log', 'Nova sessão de login detectada.');
+                sender.send('log', '✅ Nova sessão de login detectada.');
             }
 
             if (connection === 'open') {
@@ -337,17 +347,21 @@ async function startBot(sender) {
             } else if (connection === 'close') {
                 const errorMessage = lastDisconnect?.error?.message || 'Motivo desconhecido';
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
-                console.log(`Conexão fechada: ${errorMessage} (Código: ${statusCode})`); // Depuração
+                console.log(`Conexão fechada: ${errorMessage} (Código: ${statusCode})`);
                 sender.send('log', `❌ Conexão fechada: ${errorMessage} (Código: ${statusCode})`);
 
                 if (statusCode === DisconnectReason.loggedOut) {
                     sender.send('log', '❌ Sessão expirada. Use "Limpar Sessão" para gerar um novo QR Code.');
                     await clearSession();
                     await stopBot();
+                } else if (statusCode === DisconnectReason.connectionLost) {
+                    sender.send('log', '🔄 Conexão perdida. Tentando reconectar em 5 segundos...');
+                    await delay(5000);
+                    startBot(sender);
                 } else if (statusCode !== DisconnectReason.restartRequired) {
                     sender.send('log', '🔄 Tentando reconectar...');
                     await stopBot();
-                    startBot(sender); // Tenta reconectar apenas se não for reinício forçado
+                    startBot(sender);
                 } else {
                     sender.send('log', '🔄 Reinício necessário detectado. Aguardando nova tentativa...');
                     await stopBot();
@@ -364,7 +378,7 @@ async function startBot(sender) {
             }
         });
     } catch (err) {
-        console.error('Erro ao iniciar bot:', err); // Depuração
+        console.error('Erro ao iniciar bot:', err);
         sender.send('log', `❌ Erro ao iniciar bot: ${err.message}`);
         await stopBot();
     }
@@ -391,7 +405,8 @@ async function stopBot() {
 async function clearSession() {
     try {
         await fs.rm('auth_info', { recursive: true, force: true });
-        sendLog('🧹 Sessão limpa com sucesso. Pronto para gerar um novo QR Code.');
+        const exists = await fs.access('auth_info').then(() => true).catch(() => false);
+        sendLog(`🧹 Sessão limpa com sucesso. Pasta auth_info existe? ${exists}`);
     } catch (error) {
         sendLog(`⚠️ Erro ao limpar sessão: ${error.message}`);
     }
