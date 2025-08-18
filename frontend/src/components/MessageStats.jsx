@@ -41,7 +41,7 @@ function MessageStats() {
 
         const fetchInitialStats = async () => {
             try {
-                const response = await fetch('https://bot-whatsapp-1-yu8c.onrender.com/stats', {
+                const response = await fetch('https://bot-whatsapp-va5n.onrender.com/stats', {
                     method: 'GET',
                     headers: {
                         'x-session-key': sessionKey,
@@ -164,7 +164,7 @@ function MessageStats() {
         }
 
         try {
-            const response = await fetch('https://bot-whatsapp-1-yu8c.onrender.com/reset-stats', {
+            const response = await fetch('https://bot-whatsapp-va5n.onrender.com/reset-stats', {
                 method: 'POST',
                 headers: {
                     'x-session-key': sessionKey,
