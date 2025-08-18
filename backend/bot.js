@@ -37,9 +37,11 @@ let stopSignal = null;
 let contactLogs = []; // Inicializa como array vazio
 const sessions = new Map();
 
-// Configurar conexão com PostgreSQL
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgres://postgres:123@localhost:5432/bot_progress',
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 pool.connect((err) => {
