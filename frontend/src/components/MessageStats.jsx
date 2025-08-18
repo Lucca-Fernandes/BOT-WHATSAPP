@@ -66,7 +66,7 @@ function MessageStats() {
 
         fetchInitialStats();
 
-        const wsUrl = 'wss://bot-whatsapp-1-yu8c.onrender.com';
+        const wsUrl = 'wss://bot-whatsapp-va5n.onrender.com';
         const ws = new WebSocket(`${wsUrl}?sessionKey=${sessionKey}`);
         wsRef.current = ws;
 
