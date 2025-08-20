@@ -3,7 +3,7 @@ if (!process.env.DATABASE_URL) {
     console.error('Erro: DATABASE_URL não foi carregado do .env. Verifique o arquivo .env e a instalação do dotenv.');
     process.exit(1);
 }
-console.log('DATABASE_URL from .env:', process.env.DATABASE_URL); // Depuração
+console.log('DATABASE_URL from .env:', process.env.DATABASE_URL); 
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
@@ -413,7 +413,6 @@ function formatarNumeroTelefone(numero) {
     let numeroLimpo = numero.replace(/\D/g, '');
     if (numeroLimpo.length < 10) return { numeroParaEnvio: null, numeroFormatado: null };
     
-    // Garantir que o número comece com 55 e não tenha o '9' extra em DDDs que já o possuem
     if (numeroLimpo.length === 11) {
         numeroLimpo = numeroLimpo.startsWith('55') ? numeroLimpo : '55' + numeroLimpo;
     } else if (numeroLimpo.length === 10) {
@@ -591,7 +590,7 @@ async function enviarMensagens(sock, sender) {
                 addContactLog(agenteNome, contato.nome, contato.registrationCode, `Falha no envio: ${err.message}`);
             }
 
-            const waitTime = Math.floor(Math.random() * (90 - 45 + 1)) + 45;
+            const waitTime = 40;
             sender.send('log', `⏳ Aguardando ${waitTime} segundos para a próxima mensagem...`);
             await delay(waitTime * 1000);
         }
