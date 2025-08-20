@@ -237,16 +237,13 @@ async function initializeContactLogs() {
     try {
         const alunos = await fetchEnrolled();
         console.log(`📋 Inicializando contatos inválidos... Total de alunos: ${alunos.length}`);
-
         for (const aluno of alunos) {
             if (!['Ativo', 'EmRecuperacao', 'Atencao'].includes(aluno.status)) continue;
-
             const { numeroParaEnvio } = formatarNumeroTelefone(aluno.cel ?? '');
             const primeiroNome = extrairPrimeiroNome(aluno.nomeCompleto);
             const agenteRaw = aluno.agenteDoSucesso ?? '';
             const agente = extrairNomeDoEmail(agenteRaw);
             const registrationCode = aluno.registrationCode ?? 'Desconhecido';
-
             const erros = [];
             if (!numeroParaEnvio) erros.push('Número inválido');
             if (!primeiroNome) erros.push('Nome inválido');
@@ -254,7 +251,6 @@ async function initializeContactLogs() {
             if (!agente) erros.push('Nome do agente não pôde ser extraído');
             if (!aluno.monitoringLink) erros.push('Link de monitoria ausente');
             if (!aluno.monitoringDay) erros.push('Dia da monitoria ausente');
-
             if (erros.length > 0) {
                 addContactLog(agente, primeiroNome || 'Nome Desconhecido', registrationCode, erros.join(', '));
                 console.log(`⚠️ Contato inválido inicializado: ${primeiroNome || 'Nome Desconhecido'} (Registration Code: ${registrationCode}) - ${erros.join(', ')}`);
@@ -282,14 +278,12 @@ async function startBot(sender) {
     sender.send('log', 'Iniciando o bot...');
 
     try {
-        // Verificar o estado da pasta auth_info
         const authExists = await fs.access('auth_info').then(() => true).catch(() => false);
         sender.send('log', `ℹ️ Pasta auth_info existe? ${authExists}`);
 
         const { state, saveCreds } = await useMultiFileAuthState('auth_info');
         const { version } = await fetchLatestBaileysVersion();
 
-        // Verificar se há credenciais válidas
         const hasValidCreds = state && state.creds && state.creds.me;
         if (!hasValidCreds) {
             sender.send('log', 'ℹ️ Nenhuma sessão válida encontrada. Forçando geração de QR code...');
@@ -415,20 +409,24 @@ async function clearSession() {
 }
 
 function formatarNumeroTelefone(numero) {
-    if (!numero) return { numeroFormatado: null, numeroParaEnvio: null };
+    if (!numero) return { numeroParaEnvio: null, numeroFormatado: null };
     let numeroLimpo = numero.replace(/\D/g, '');
-    if (numeroLimpo.startsWith('0055')) numeroLimpo = numeroLimpo.slice(4);
-    else if (numeroLimpo.startsWith('55')) numeroLimpo = numeroLimpo.slice(2);
-    if (numeroLimpo.length < 10) return { numeroFormatado: null, numeroParaEnvio: null };
-    const ddd = numeroLimpo.slice(0, 2);
-    let corpo = numeroLimpo.slice(2);
-    if (corpo.length === 9 && corpo.startsWith('9')) corpo = corpo.slice(1);
-    if (corpo.length !== 8) return { numeroFormatado: null, numeroParaEnvio: null };
-    const parte1 = corpo.slice(0, 4);
-    const parte2 = corpo.slice(4);
-    const numeroFormatado = `+55 ${ddd} ${parte1}-${parte2}`;
-    const numeroParaEnvio = numeroFormatado;
-    return { numeroFormatado, numeroParaEnvio };
+    if (numeroLimpo.length < 10) return { numeroParaEnvio: null, numeroFormatado: null };
+    
+    // Garantir que o número comece com 55 e não tenha o '9' extra em DDDs que já o possuem
+    if (numeroLimpo.length === 11) {
+        numeroLimpo = numeroLimpo.startsWith('55') ? numeroLimpo : '55' + numeroLimpo;
+    } else if (numeroLimpo.length === 10) {
+        numeroLimpo = '55' + numeroLimpo;
+    } else {
+        return { numeroParaEnvio: null, numeroFormatado: null };
+    }
+
+    const ddd = numeroLimpo.substring(2, 4);
+    const corpo = numeroLimpo.substring(4);
+    const numeroFormatado = `+55 (${ddd}) ${corpo.substring(0, 5)}-${corpo.substring(5)}`;
+    
+    return { numeroParaEnvio: numeroLimpo, numeroFormatado: numeroFormatado };
 }
 
 function extrairPrimeiroNome(nome) {
@@ -511,120 +509,151 @@ async function carregarContatos(sender) {
 }
 
 async function enviarMensagens(sock, sender) {
-    const contatos = await carregarContatos(sender);
-    const hoje = new Date().toLocaleString('pt-BR', { weekday: 'long' }).toLowerCase().replace('-feira', '').trim();
-    sender.send('log', `📅 Hoje é: ${hoje}`);
+    try {
+        const contatos = await carregarContatos(sender);
+        const hoje = new Date().toLocaleString('pt-BR', { weekday: 'long' }).toLowerCase().replace('-feira', '').trim();
+        sender.send('log', `📅 Hoje é: ${hoje}`);
 
-    if (!contatos[hoje] || contatos[hoje].length === 0) {
-        sender.send('log', `⚠️ Nenhum contato válido para hoje (${hoje}).`);
-        const stats = await loadStats(hoje);
-        const statsDiaMessage = `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${stats.total_sent}`;
-        sender.send('log', statsDiaMessage);
-        return;
-    }
-
-    let { total_sent: totalSent, agents: initialAgents } = await loadStats(hoje);
-    const statsPorDia = { [hoje]: totalSent };
-    const statsPorAgente = { [hoje]: { ...initialAgents } };
-
-    const todosAgentes = [...new Set(contatos[hoje].map(c => c.agenteNome))];
-    todosAgentes.forEach(agente => {
-        statsPorAgente[hoje][agente] = statsPorAgente[hoje][agente] || 0;
-    });
-
-    const initialStatsMessage = `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`;
-    sender.send('log', initialStatsMessage);
-
-    const contatosOrdenados = [...contatos[hoje]].sort((a, b) => {
-        const [_, horaA] = a.monitoringDay.split(' às') || ['00:00'];
-        const [dummyB, horaB] = b.monitoringDay.split(' às') || ['00:00'];
-        return horaA.localeCompare(horaB);
-    });
-
-    for (const contato of contatosOrdenados) {
-        if (stopSignal) {
-            sender.send('log', '⛔ Envio de mensagens interrompido: Bot foi parado.');
-            throw stopSignal;
+        if (!contatos[hoje] || contatos[hoje].length === 0) {
+            sender.send('log', `⚠️ Nenhum contato válido para hoje (${hoje}).`);
+            const stats = await loadStats(hoje);
+            const statsDiaMessage = `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${stats.total_sent}`;
+            sender.send('log', statsDiaMessage);
+            return;
         }
 
-        if (await isMessageSent(contato.registrationCode, contato.monitoringDay)) {
-            sender.send('log', `⏩ Pulando ${contato.nome} (já enviado)`);
-            continue;
-        }
+        let { total_sent: totalSent, agents: initialAgents } = await loadStats(hoje);
+        const statsPorDia = { [hoje]: totalSent };
+        const statsPorAgente = { [hoje]: { ...initialAgents } };
 
-        const numeroLimpo = contato.numero.replace(/\D/g, '');
-        const numeroWhatsApp = `${numeroLimpo}@s.whatsapp.net`;
-        const agenteNome = contato.agenteNome;
+        const todosAgentes = [...new Set(contatos[hoje].map(c => c.agenteNome))];
+        todosAgentes.forEach(agente => {
+            statsPorAgente[hoje][agente] = statsPorAgente[hoje][agente] || 0;
+        });
 
-        const mensagem = `Olá ${contato.nome.toUpperCase()}! \n🚀 Lembrete do atendimento semanal com ${agenteNome}, \n${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
+        const initialStatsMessage = `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`;
+        sender.send('log', initialStatsMessage);
 
-        try {
+        const contatosOrdenados = [...contatos[hoje]].sort((a, b) => {
+            const [_, horaA] = a.monitoringDay.split(' às') || ['00:00'];
+            const [dummyB, horaB] = b.monitoringDay.split(' às') || ['00:00'];
+            return horaA.localeCompare(horaB);
+        });
+
+        for (const contato of contatosOrdenados) {
             if (stopSignal) {
                 sender.send('log', '⛔ Envio de mensagens interrompido: Bot foi parado.');
-                throw stopSignal;
+                break;
             }
-            await Promise.race([
-                sock.sendMessage(numeroWhatsApp, { text: mensagem }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo limite excedido')), 10000))
-            ]);
-            totalSent++;
-            statsPorDia[hoje]++;
-            statsPorAgente[hoje][agenteNome] = (statsPorAgente[hoje][agenteNome] || 0) + 1;
 
-            await markMessageAsSent(contato.registrationCode, contato.monitoringDay);
-            await saveStats(hoje, totalSent, statsPorAgente[hoje]);
-
-            const statsMessage = `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`;
-            const statsDiaMessage = `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${statsPorDia[hoje]}`;
-            const agentStats = { type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } };
-            sender.send('log', `✅ Mensagem enviada para ${contato.numeroFormatado} às ${contato.monitoringDay.split(' às')[1] || 'horário não especificado'}`);
-            sender.send('log', statsMessage);
-            sender.send('log', statsDiaMessage);
-            sender.send('log', JSON.stringify(agentStats));
-        } catch (err) {
-            if (err === stopSignal) {
-                throw err;
+            let jaEnviado = false;
+            try {
+                jaEnviado = await isMessageSent(contato.registrationCode, contato.monitoringDay);
+            } catch (dbError) {
+                console.error('Erro ao verificar status de envio:', dbError);
+                sender.send('log', `⚠️ Erro ao verificar status de envio para ${contato.nome}: ${dbError.message}`);
+                // Continue para tentar enviar, mas não salve o log se a verificação falhar
             }
-            sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado} (Registration Code: ${contato.registrationCode}): ${err.message}`);
+
+            if (jaEnviado) {
+                sender.send('log', `⏩ Pulando ${contato.nome} (já enviado)`);
+                continue;
+            }
+
+            const numeroLimpo = contato.numero.replace(/\D/g, '');
+            const numeroWhatsApp = `${numeroLimpo}@s.whatsapp.net`;
+            const agenteNome = contato.agenteNome;
+
+            const mensagem = `Olá ${contato.nome.toUpperCase()}! \n🚀 Lembrete do atendimento semanal com ${agenteNome}, \n${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
+
+            try {
+                await Promise.race([
+                    sock.sendMessage(numeroWhatsApp, { text: mensagem }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo limite excedido')), 10000))
+                ]);
+                
+                totalSent++;
+                statsPorDia[hoje] = (statsPorDia[hoje] || 0) + 1;
+                statsPorAgente[hoje][agenteNome] = (statsPorAgente[hoje][agenteNome] || 0) + 1;
+
+                await markMessageAsSent(contato.registrationCode, contato.monitoringDay);
+                await saveStats(hoje, totalSent, statsPorAgente[hoje]);
+
+                const statsMessage = `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`;
+                const statsDiaMessage = `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${statsPorDia[hoje]}`;
+                const agentStats = { type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } };
+                sender.send('log', `✅ Mensagem enviada para ${contato.numeroFormatado} às ${contato.monitoringDay.split(' às')[1] || 'horário não especificado'}`);
+                sender.send('log', statsMessage);
+                sender.send('log', statsDiaMessage);
+                sender.send('log', JSON.stringify(agentStats));
+            } catch (err) {
+                sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado} (Registration Code: ${contato.registrationCode}): ${err.message}`);
+                addContactLog(agenteNome, contato.nome, contato.registrationCode, `Falha no envio: ${err.message}`);
+            }
+
+            const waitTime = Math.floor(Math.random() * (90 - 45 + 1)) + 45;
+            sender.send('log', `⏳ Aguardando ${waitTime} segundos para a próxima mensagem...`);
+            await delay(waitTime * 1000);
         }
 
-        sender.send('log', `⏳ Aguardando 40s...`);
-        await delay(40000);
+        const finalStatsMessage = `📊 Estatísticas Finais: Total Enviadas: ${totalSent}`;
+        const finalAgentStats = { type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } };
+        sender.send('log', finalStatsMessage);
+        sender.send('log', JSON.stringify(finalAgentStats));
+
+        await saveStats(hoje, totalSent, statsPorAgente[hoje]);
+    } catch (err) {
+        console.error('Erro na execução do bot:', err);
+        sender.send('log', `❌ Erro fatal na execução do bot: ${err.message}.`);
+        await stopBot();
     }
-
-    const finalStatsMessage = `📊 Estatísticas Finais: Total Enviadas: ${totalSent}`;
-    const finalAgentStats = { type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } };
-    sender.send('log', finalStatsMessage);
-    sender.send('log', JSON.stringify(finalAgentStats));
-
-    await saveStats(hoje, totalSent, statsPorAgente[hoje]);
 }
 
 async function isMessageSent(registrationCode, monitoringDay) {
-    const result = await pool.query(
-        'SELECT 1 FROM sent_messages WHERE registration_code = $1 AND monitoring_day = $2',
-        [registrationCode, monitoringDay]
-    );
-    return result.rows.length > 0;
+    try {
+        const result = await pool.query(
+            'SELECT 1 FROM sent_messages WHERE registration_code = $1 AND monitoring_day = $2',
+            [registrationCode, monitoringDay]
+        );
+        return result.rows.length > 0;
+    } catch (error) {
+        console.error('Erro ao verificar mensagem no banco de dados:', error);
+        throw error;
+    }
 }
 
 async function markMessageAsSent(registrationCode, monitoringDay) {
-    await pool.query(
-        'INSERT INTO sent_messages (registration_code, monitoring_day) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [registrationCode, monitoringDay]
-    );
+    try {
+        await pool.query(
+            'INSERT INTO sent_messages (registration_code, monitoring_day) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [registrationCode, monitoringDay]
+        );
+    } catch (error) {
+        console.error('Erro ao marcar mensagem como enviada no banco de dados:', error);
+        throw error;
+    }
 }
 
 async function loadStats(day) {
-    const result = await pool.query('SELECT total_sent, agents FROM stats WHERE day = $1', [day]);
-    return result.rows.length > 0 ? result.rows[0] : { total_sent: 0, agents: {} };
+    try {
+        const result = await pool.query('SELECT total_sent, agents FROM stats WHERE day = $1', [day]);
+        return result.rows.length > 0 ? result.rows[0] : { total_sent: 0, agents: {} };
+    } catch (error) {
+        console.error('Erro ao carregar estatísticas do banco de dados:', error);
+        throw error;
+    }
 }
 
 async function saveStats(day, totalSent, agents) {
-    await pool.query(
-        'INSERT INTO stats (day, total_sent, agents) VALUES ($1, $2, $3) ON CONFLICT (day) DO UPDATE SET total_sent = $2, agents = $3',
-        [day, totalSent, JSON.stringify(agents)]
-    );
+    try {
+        await pool.query(
+            'INSERT INTO stats (day, total_sent, agents) VALUES ($1, $2, $3) ON CONFLICT (day) DO UPDATE SET total_sent = $2, agents = $3',
+            [day, totalSent, JSON.stringify(agents)]
+        );
+    } catch (error) {
+        console.error('Erro ao salvar estatísticas no banco de dados:', error);
+        throw error;
+    }
 }
 
 process.on('uncaughtException', (err) => {
