@@ -220,7 +220,7 @@ wss.on('connection', (ws, req) => {
         }
         ws.isAlive = false;
         ws.ping();
-    }, 30000);
+    }, 60000); // Aumentado para 60 segundos para reduzir sobrecarga
 
     ws.isAlive = true;
     ws.on('pong', () => ws.isAlive = true);
@@ -255,6 +255,7 @@ async function useDatabaseAuthState() {
                 'INSERT INTO auth_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
                 ['creds', JSON.stringify(creds)]
             );
+            console.log('Credenciais salvas com sucesso');
         } catch (err) {
             console.error('Erro ao salvar credenciais:', err);
             sendLog(`⚠️ Erro ao salvar credenciais: ${err.message}`);
@@ -264,11 +265,13 @@ async function useDatabaseAuthState() {
     const loadCreds = async () => {
         try {
             const result = await pool.query('SELECT value FROM auth_state WHERE key = $1', ['creds']);
-            return result.rows.length > 0 ? JSON.parse(result.rows[0].value) : null;
+            const creds = result.rows.length > 0 ? JSON.parse(result.rows[0].value) : {};
+            console.log('Credenciais carregadas:', creds.me ? 'Encontradas' : 'Não encontradas ou novas');
+            return creds;
         } catch (err) {
             console.error('Erro ao carregar credenciais:', err);
             sendLog(`⚠️ Erro ao carregar credenciais: ${err.message}`);
-            return null;
+            return {};
         }
     };
 
@@ -357,8 +360,8 @@ async function startBot(sender) {
         const { state, saveCreds } = await useDatabaseAuthState();
         const { version } = await fetchLatestBaileysVersion();
 
-        const hasValidCreds = state && state.creds && state.creds.me;
-        sender.send('log', `ℹ️ Credenciais válidas encontradas? ${hasValidCreds}`);
+        const hasValidCreds = !!state?.creds?.me;
+        sender.send('log', `ℹ️ Credenciais válidas encontradas? ${hasValidCreds} (creds: ${state.creds ? JSON.stringify(state.creds) : 'vazio'})`);
 
         sock = makeWASocket({
             version,
@@ -401,9 +404,7 @@ async function startBot(sender) {
             console.log(`Conexão: ${connection}, Status: ${statusCode}, Mensagem: ${errorMessage}, QR: ${!!qr}, Novo Login: ${!!isNewLogin}`);
             sender.send('log', `ℹ️ Conexão: ${connection}, Status: ${statusCode}, Mensagem: ${errorMessage}`);
 
-            if (qr && hasValidCreds) {
-                sender.send('log', 'ℹ️ Credenciais válidas encontradas, tentando reconectar sem QR code...');
-            } else if (qr) {
+            if (qr) {
                 const qrCodeUrl = await qrcode.toDataURL(qr);
                 console.log('QR Code gerado:', qrCodeUrl);
                 sender.send('qr', qrCodeUrl);
@@ -423,6 +424,8 @@ async function startBot(sender) {
                     sender.send('log', '❌ Sessão expirada/forçada logout. Limpando auth_state...');
                     await clearSession();
                     await stopBot();
+                    sender.send('log', '📱 Nova autenticação necessária. Reiniciando bot para gerar QR code...');
+                    startBot(sender);
                 } else if (statusCode === DisconnectReason.connectionLost || statusCode === DisconnectReason.connectionClosed) {
                     if (retryCount < maxRetries) {
                         retryCount++;
@@ -467,6 +470,11 @@ async function startBot(sender) {
         console.error('Erro ao iniciar bot:', err);
         sender.send('log', `❌ Erro ao iniciar bot: ${err.message}`);
         await stopBot();
+        if (err.message.includes('Cannot read properties of null') || err.message.includes('Cannot destructure property \'creds\'')) {
+            sender.send('log', '📱 Credenciais ausentes ou inválidas. Gerando novo QR code na próxima tentativa...');
+            await clearSession();
+            startBot(sender);
+        }
     }
 }
 
