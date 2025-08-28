@@ -3,7 +3,7 @@ if (!process.env.DATABASE_URL) {
     console.error('Erro: DATABASE_URL não foi carregado do .env. Verifique o arquivo .env e a instalação do dotenv.');
     process.exit(1);
 }
-console.log('DATABASE_URL from .env:', process.env.DATABASE_URL); // Depuração
+console.log('DATABASE_URL from .env:', process.env.DATABASE_URL);
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
@@ -34,21 +34,24 @@ let wssClients = [];
 let sock = null;
 let isRunning = false;
 let stopSignal = null;
-let contactLogs = []; // Inicializa como array vazio
+let contactLogs = [];
 const sessions = new Map();
+let retryCount = 0;
+const maxRetries = 3;
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgres://postgres:123@localhost:5432/bot_progress',
-    ssl: {
-        rejectUnauthorized: false
-    }
+    ssl: { rejectUnauthorized: false },
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000
 });
 
 pool.connect((err) => {
     if (err) {
         console.error('Erro ao conectar ao PostgreSQL:', err.stack);
-        console.error('Tentativa de conexão:', process.env.DATABASE_URL); // Depuração
-        process.exit(1); // Encerra o processo se a conexão falhar
+        console.error('Tentativa de conexão:', process.env.DATABASE_URL);
+        process.exit(1);
     } else {
         console.log('Conectado ao PostgreSQL');
         pool.query(`
@@ -72,20 +75,20 @@ pool.connect((err) => {
 
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
-    initializeContactLogs().catch(console.error);
+    initializeContactLogs().catch(err => {
+        console.error('Erro ao inicializar contatos:', err);
+        sendLog(`⚠️ Erro ao inicializar contatos: ${err.message}`);
+    });
 });
 
 const wss = new WebSocketServer({ server });
 
-// Constante para dias da semana
 const diasSemana = ['segunda', 'terça', 'quarta', 'quinta', 'sexta'];
 
-// Função para gerar uma chave de sessão simples
 const generateSessionKey = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 };
 
-// Middleware para verificar a chave de sessão
 const authenticateSession = (req, res, next) => {
     const sessionKey = req.headers['x-session-key'];
     if (!sessionKey || !sessions.has(sessionKey)) {
@@ -95,7 +98,6 @@ const authenticateSession = (req, res, next) => {
     next();
 };
 
-// Rotas de autenticação
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
     const validUsername = process.env.ADMIN_USERNAME || 'admin';
@@ -115,7 +117,6 @@ app.post('/logout', authenticateSession, (req, res) => {
     res.json({ message: 'Logout realizado com sucesso' });
 });
 
-// Rotas do bot
 app.post('/start-bot', authenticateSession, (req, res) => {
     if (botRunning) return res.status(400).json({ message: 'Bot já está em execução!' });
     botRunning = true;
@@ -210,9 +211,11 @@ wss.on('connection', (ws, req) => {
     console.log('Novo cliente WebSocket conectado');
     wssClients.push(ws);
 
+    const pingInterval = setInterval(() => ws.ping(), 30000); // Ping a cada 30s
     ws.on('close', () => {
         console.log('Cliente WebSocket desconectado');
         wssClients = wssClients.filter(client => client !== ws);
+        clearInterval(pingInterval);
     });
 });
 
@@ -263,6 +266,7 @@ async function initializeContactLogs() {
         console.log(`📊 Contatos inválidos pré-carregados: ${contactLogs.length}`);
     } catch (error) {
         console.error('Erro ao inicializar contatos inválidos:', error);
+        sendLog(`⚠️ Erro ao inicializar contatos inválidos: ${error.message}`);
     }
 }
 
@@ -282,14 +286,16 @@ async function startBot(sender) {
     sender.send('log', 'Iniciando o bot...');
 
     try {
-        // Verificar o estado da pasta auth_info
         const authExists = await fs.access('auth_info').then(() => true).catch(() => false);
         sender.send('log', `ℹ️ Pasta auth_info existe? ${authExists}`);
+        if (!authExists) {
+            await fs.mkdir('auth_info', { recursive: true });
+            sender.send('log', '📁 Pasta auth_info criada.');
+        }
 
         const { state, saveCreds } = await useMultiFileAuthState('auth_info');
         const { version } = await fetchLatestBaileysVersion();
 
-        // Verificar se há credenciais válidas
         const hasValidCreds = state && state.creds && state.creds.me;
         if (!hasValidCreds) {
             sender.send('log', 'ℹ️ Nenhuma sessão válida encontrada. Forçando geração de QR code...');
@@ -344,29 +350,45 @@ async function startBot(sender) {
             }
 
             if (connection === 'open') {
+                retryCount = 0;
                 sender.send('log', '✅ Conectado ao WhatsApp!');
                 await enviarMensagens(sock, sender);
             } else if (connection === 'close') {
-                const errorMessage = lastDisconnect?.error?.message || 'Motivo desconhecido';
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                console.log(`Conexão fechada: ${errorMessage} (Código: ${statusCode})`);
-                sender.send('log', `❌ Conexão fechada: ${errorMessage} (Código: ${statusCode})`);
+                const error = lastDisconnect?.error;
+                const statusCode = error?.output?.statusCode || 'Desconhecido';
+                const errorMessage = error?.message || 'Sem mensagem';
+                const errorDetails = JSON.stringify(error, null, 2);
+                sender.send('log', `❌ Conexão fechada! Código: ${statusCode} | Mensagem: ${errorMessage} | Detalhes: ${errorDetails}`);
+                console.error(`Detalhes do fechamento: Código ${statusCode}, Msg: ${errorMessage}, Detalhes: ${errorDetails}`);
 
                 if (statusCode === DisconnectReason.loggedOut) {
-                    sender.send('log', '❌ Sessão expirada. Use "Limpar Sessão" para gerar um novo QR Code.');
+                    sender.send('log', '❌ Sessão expirada/forçada logout. Limpando auth_info...');
                     await clearSession();
                     await stopBot();
-                } else if (statusCode === DisconnectReason.connectionLost) {
-                    sender.send('log', '🔄 Conexão perdida. Tentando reconectar em 5 segundos...');
-                    await delay(5000);
-                    startBot(sender);
-                } else if (statusCode !== DisconnectReason.restartRequired) {
-                    sender.send('log', '🔄 Tentando reconectar...');
+                } else if (statusCode === DisconnectReason.connectionLost || statusCode === DisconnectReason.connectionClosed) {
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        sender.send('log', `🔄 Conexão perdida/fechada. Tentativa ${retryCount}/${maxRetries} em ${5 * retryCount}s...`);
+                        await delay(5000 * retryCount);
+                        startBot(sender);
+                    } else {
+                        sender.send('log', '❌ Máximo de tentativas atingido. Parando bot.');
+                        await stopBot();
+                    }
+                } else if (statusCode === DisconnectReason.restartRequired) {
+                    sender.send('log', '🔄 Reinício necessário. Reiniciando bot...');
                     await stopBot();
                     startBot(sender);
                 } else {
-                    sender.send('log', '🔄 Reinício necessário detectado. Aguardando nova tentativa...');
-                    await stopBot();
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        sender.send('log', `🔄 Desconhecido (código ${statusCode}). Tentativa ${retryCount}/${maxRetries} em ${5 * retryCount}s...`);
+                        await stopBot();
+                        startBot(sender);
+                    } else {
+                        sender.send('log', '❌ Máximo de tentativas atingido. Parando bot.');
+                        await stopBot();
+                    }
                 }
             }
         });
@@ -410,6 +432,7 @@ async function clearSession() {
         const exists = await fs.access('auth_info').then(() => true).catch(() => false);
         sendLog(`🧹 Sessão limpa com sucesso. Pasta auth_info existe? ${exists}`);
     } catch (error) {
+        console.error('Erro ao limpar sessão:', error);
         sendLog(`⚠️ Erro ao limpar sessão: ${error.message}`);
     }
 }
@@ -498,19 +521,28 @@ async function carregarContatos(sender) {
                 agenteNome: agente,
                 monitoringDay: aluno.monitoringDay,
                 monitoringLink: aluno.monitoringLink,
-                registrationCode: registrationCode
+                registrationCode
             });
         }
 
         sender.send('log', `📊 Contatos carregados: ${JSON.stringify(Object.keys(contatosPorDia))}`);
         return contatosPorDia;
     } catch (error) {
+        console.error('Erro ao carregar contatos:', error);
         sender.send('log', `⚠️ Erro ao carregar contatos: ${error.message}`);
         throw error;
     }
 }
 
 async function enviarMensagens(sock, sender) {
+    const monitorResources = () => {
+        const used = process.memoryUsage();
+        const memoryInfo = `Memória: RSS=${(used.rss / 1024 / 1024).toFixed(2)}MB, Heap=${(used.heapUsed / 1024 / 1024).toFixed(2)}MB/${(used.heapTotal / 1024 / 1024).toFixed(2)}MB`;
+        console.log(memoryInfo);
+        sendLog(`📈 ${memoryInfo}`);
+    };
+    setInterval(monitorResources, 60000);
+
     const contatos = await carregarContatos(sender);
     const hoje = new Date().toLocaleString('pt-BR', { weekday: 'long' }).toLowerCase().replace('-feira', '').trim();
     sender.send('log', `📅 Hoje é: ${hoje}`);
@@ -518,8 +550,7 @@ async function enviarMensagens(sock, sender) {
     if (!contatos[hoje] || contatos[hoje].length === 0) {
         sender.send('log', `⚠️ Nenhum contato válido para hoje (${hoje}).`);
         const stats = await loadStats(hoje);
-        const statsDiaMessage = `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${stats.total_sent}`;
-        sender.send('log', statsDiaMessage);
+        sender.send('log', `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${stats.total_sent}`);
         return;
     }
 
@@ -532,12 +563,11 @@ async function enviarMensagens(sock, sender) {
         statsPorAgente[hoje][agente] = statsPorAgente[hoje][agente] || 0;
     });
 
-    const initialStatsMessage = `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`;
-    sender.send('log', initialStatsMessage);
+    sender.send('log', `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`);
 
     const contatosOrdenados = [...contatos[hoje]].sort((a, b) => {
         const [_, horaA] = a.monitoringDay.split(' às') || ['00:00'];
-        const [dummyB, horaB] = b.monitoringDay.split(' às') || ['00:00'];
+        const [__, horaB] = b.monitoringDay.split(' às') || ['00:00'];
         return horaA.localeCompare(horaB);
     });
 
@@ -555,14 +585,9 @@ async function enviarMensagens(sock, sender) {
         const numeroLimpo = contato.numero.replace(/\D/g, '');
         const numeroWhatsApp = `${numeroLimpo}@s.whatsapp.net`;
         const agenteNome = contato.agenteNome;
-
         const mensagem = `Olá ${contato.nome.toUpperCase()}! \n🚀 Lembrete do atendimento semanal com ${agenteNome}, \n${contato.monitoringDay}. Posso contar com você? 👇\n${contato.monitoringLink}`;
 
         try {
-            if (stopSignal) {
-                sender.send('log', '⛔ Envio de mensagens interrompido: Bot foi parado.');
-                throw stopSignal;
-            }
             await Promise.race([
                 sock.sendMessage(numeroWhatsApp, { text: mensagem }),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo limite excedido')), 10000))
@@ -574,57 +599,77 @@ async function enviarMensagens(sock, sender) {
             await markMessageAsSent(contato.registrationCode, contato.monitoringDay);
             await saveStats(hoje, totalSent, statsPorAgente[hoje]);
 
-            const statsMessage = `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`;
-            const statsDiaMessage = `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${statsPorDia[hoje]}`;
-            const agentStats = { type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } };
             sender.send('log', `✅ Mensagem enviada para ${contato.numeroFormatado} às ${contato.monitoringDay.split(' às')[1] || 'horário não especificado'}`);
-            sender.send('log', statsMessage);
-            sender.send('log', statsDiaMessage);
-            sender.send('log', JSON.stringify(agentStats));
+            sender.send('log', `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`);
+            sender.send('log', `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${statsPorDia[hoje]}`);
+            sender.send('log', JSON.stringify({ type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } }));
         } catch (err) {
-            if (err === stopSignal) {
-                throw err;
-            }
+            if (err === stopSignal) throw err;
+            console.error(`Erro ao enviar mensagem para ${contato.numeroFormatado} (${contato.registrationCode}):`, err);
             sender.send('log', `⚠️ Falha ao enviar para ${contato.numeroFormatado} (Registration Code: ${contato.registrationCode}): ${err.message}`);
+            continue;
         }
 
         sender.send('log', `⏳ Aguardando 40s...`);
         await delay(40000);
     }
 
-    const finalStatsMessage = `📊 Estatísticas Finais: Total Enviadas: ${totalSent}`;
-    const finalAgentStats = { type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } };
-    sender.send('log', finalStatsMessage);
-    sender.send('log', JSON.stringify(finalAgentStats));
-
+    sender.send('log', `📊 Estatísticas Finais: Total Enviadas: ${totalSent}`);
+    sender.send('log', JSON.stringify({ type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } }));
     await saveStats(hoje, totalSent, statsPorAgente[hoje]);
 }
 
 async function isMessageSent(registrationCode, monitoringDay) {
-    const result = await pool.query(
-        'SELECT 1 FROM sent_messages WHERE registration_code = $1 AND monitoring_day = $2',
-        [registrationCode, monitoringDay]
-    );
-    return result.rows.length > 0;
+    try {
+        const result = await pool.query(
+            'SELECT 1 FROM sent_messages WHERE registration_code = $1 AND monitoring_day = $2',
+            [registrationCode, monitoringDay]
+        );
+        return result.rows.length > 0;
+    } catch (err) {
+        console.error(`Erro ao verificar mensagem enviada (${registrationCode}):`, err);
+        sendLog(`⚠️ Erro no banco (isMessageSent): ${err.message}`);
+        return false;
+    }
 }
 
 async function markMessageAsSent(registrationCode, monitoringDay) {
-    await pool.query(
-        'INSERT INTO sent_messages (registration_code, monitoring_day) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [registrationCode, monitoringDay]
-    );
+    try {
+        await pool.query(
+            'INSERT INTO sent_messages (registration_code, monitoring_day) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [registrationCode, monitoringDay]
+        );
+        console.log(`✅ Mensagem marcada como enviada: ${registrationCode}`);
+    } catch (err) {
+        console.error(`Erro ao marcar mensagem como enviada (${registrationCode}):`, err);
+        sendLog(`⚠️ Erro no banco (markMessageAsSent): ${err.message}`);
+        throw err;
+    }
 }
 
 async function loadStats(day) {
-    const result = await pool.query('SELECT total_sent, agents FROM stats WHERE day = $1', [day]);
-    return result.rows.length > 0 ? result.rows[0] : { total_sent: 0, agents: {} };
+    try {
+        const result = await pool.query('SELECT total_sent, agents FROM stats WHERE day = $1', [day]);
+        return result.rows.length > 0 ? result.rows[0] : { total_sent: 0, agents: {} };
+    } catch (err) {
+        console.error(`Erro ao carregar estatísticas (${day}):`, err);
+        sendLog(`⚠️ Erro no banco (loadStats): ${err.message}`);
+        return { total_sent: 0, agents: {} };
+    }
 }
 
 async function saveStats(day, totalSent, agents) {
-    await pool.query(
-        'INSERT INTO stats (day, total_sent, agents) VALUES ($1, $2, $3) ON CONFLICT (day) DO UPDATE SET total_sent = $2, agents = $3',
-        [day, totalSent, JSON.stringify(agents)]
-    );
+    try {
+        await pool.query(
+            'INSERT INTO stats (day, total_sent, agents) VALUES ($1, $2, $3) ON CONFLICT (day) DO UPDATE SET total_sent = $2, agents = $3',
+            [day, totalSent, JSON.stringify(agents)]
+        );
+        console.log(`✅ Estatísticas salvas para ${day}: ${totalSent}`);
+    } catch (err) {
+        console.error(`Erro ao salvar estatísticas (${day}):`, err);
+        sendLog(`⚠️ Erro no banco (saveStats): ${err.message}`);
+        throw err;
+    }
 }
 
 process.on('uncaughtException', (err) => {
