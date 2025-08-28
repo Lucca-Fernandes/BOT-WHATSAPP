@@ -9,14 +9,12 @@ const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const {
     makeWASocket,
-    useMultiFileAuthState,
     DisconnectReason,
     Browsers,
     fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 const qrcode = require('qrcode');
 const { fetchEnrolled } = require('./services/api');
-const fs = require('fs').promises;
 const P = require('pino');
 const { Pool } = require('pg');
 
@@ -67,6 +65,10 @@ pool.connect((err) => {
                 total_sent INTEGER DEFAULT 0,
                 agents JSONB DEFAULT '{}'
             );
+            CREATE TABLE IF NOT EXISTS auth_state (
+                key TEXT PRIMARY KEY,
+                value JSONB
+            );
         `, (err) => {
             if (err) console.error('Erro ao criar tabelas:', err.stack);
         });
@@ -81,7 +83,7 @@ const server = app.listen(port, () => {
     });
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, clientTracking: true, maxPayload: 4096 });
 
 const diasSemana = ['segunda', 'terça', 'quarta', 'quinta', 'sexta'];
 
@@ -246,6 +248,62 @@ const addContactLog = (agent, student, registrationCode, reason) => {
     }
 };
 
+async function useDatabaseAuthState() {
+    const saveCreds = async (creds) => {
+        try {
+            await pool.query(
+                'INSERT INTO auth_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+                ['creds', JSON.stringify(creds)]
+            );
+        } catch (err) {
+            console.error('Erro ao salvar credenciais:', err);
+            sendLog(`⚠️ Erro ao salvar credenciais: ${err.message}`);
+        }
+    };
+
+    const loadCreds = async () => {
+        try {
+            const result = await pool.query('SELECT value FROM auth_state WHERE key = $1', ['creds']);
+            return result.rows.length > 0 ? JSON.parse(result.rows[0].value) : null;
+        } catch (err) {
+            console.error('Erro ao carregar credenciais:', err);
+            sendLog(`⚠️ Erro ao carregar credenciais: ${err.message}`);
+            return null;
+        }
+    };
+
+    const state = {
+        creds: await loadCreds(),
+        keys: {
+            get: async (type, ids) => {
+                try {
+                    const result = await pool.query('SELECT value FROM auth_state WHERE key = $1', [type]);
+                    return result.rows.length > 0 ? JSON.parse(result.rows[0].value) : {};
+                } catch (err) {
+                    console.error(`Erro ao carregar keys (${type}):`, err);
+                    sendLog(`⚠️ Erro ao carregar keys (${type}): ${err.message}`);
+                    return {};
+                }
+            },
+            set: async (data) => {
+                for (const [key, value] of Object.entries(data)) {
+                    try {
+                        await pool.query(
+                            'INSERT INTO auth_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+                            [key, JSON.stringify(value)]
+                        );
+                    } catch (err) {
+                        console.error(`Erro ao salvar keys (${key}):`, err);
+                        sendLog(`⚠️ Erro ao salvar keys (${key}): ${err.message}`);
+                    }
+                }
+            }
+        }
+    };
+
+    return { state, saveCreds };
+}
+
 async function initializeContactLogs() {
     try {
         const alunos = await fetchEnrolled();
@@ -296,20 +354,11 @@ async function startBot(sender) {
     sender.send('log', 'Iniciando o bot...');
 
     try {
-        const authExists = await fs.access('auth_info').then(() => true).catch(() => false);
-        sender.send('log', `ℹ️ Pasta auth_info existe? ${authExists}`);
-        if (!authExists) {
-            await fs.mkdir('auth_info', { recursive: true });
-            sender.send('log', '📁 Pasta auth_info criada.');
-        }
-
-        const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+        const { state, saveCreds } = await useDatabaseAuthState();
         const { version } = await fetchLatestBaileysVersion();
 
         const hasValidCreds = state && state.creds && state.creds.me;
-        if (!hasValidCreds) {
-            sender.send('log', 'ℹ️ Nenhuma sessão válida encontrada. Forçando geração de QR code...');
-        }
+        sender.send('log', `ℹ️ Credenciais válidas encontradas? ${hasValidCreds}`);
 
         sock = makeWASocket({
             version,
@@ -345,11 +394,16 @@ async function startBot(sender) {
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update) => {
-            console.log('Conexão atualizada:', JSON.stringify(update, null, 2));
-            sender.send('log', `ℹ️ Conexão atualizada: ${JSON.stringify(update, null, 2)}`);
             const { connection, lastDisconnect, qr, isNewLogin } = update;
+            const error = lastDisconnect?.error;
+            const statusCode = error?.output?.statusCode || 'Desconhecido';
+            const errorMessage = error?.message || 'Sem mensagem';
+            console.log(`Conexão: ${connection}, Status: ${statusCode}, Mensagem: ${errorMessage}, QR: ${!!qr}, Novo Login: ${!!isNewLogin}`);
+            sender.send('log', `ℹ️ Conexão: ${connection}, Status: ${statusCode}, Mensagem: ${errorMessage}`);
 
-            if (qr) {
+            if (qr && hasValidCreds) {
+                sender.send('log', 'ℹ️ Credenciais válidas encontradas, tentando reconectar sem QR code...');
+            } else if (qr) {
                 const qrCodeUrl = await qrcode.toDataURL(qr);
                 console.log('QR Code gerado:', qrCodeUrl);
                 sender.send('qr', qrCodeUrl);
@@ -365,15 +419,8 @@ async function startBot(sender) {
                 sender.send('log', '✅ Conectado ao WhatsApp!');
                 await enviarMensagens(sock, sender);
             } else if (connection === 'close') {
-                const error = lastDisconnect?.error;
-                const statusCode = error?.output?.statusCode || 'Desconhecido';
-                const errorMessage = error?.message || 'Sem mensagem';
-                const errorDetails = JSON.stringify(error, null, 2);
-                sender.send('log', `❌ Conexão fechada! Código: ${statusCode} | Mensagem: ${errorMessage} | Detalhes: ${errorDetails}`);
-                console.error(`Detalhes do fechamento: Código ${statusCode}, Msg: ${errorMessage}, Detalhes: ${errorDetails}`);
-
                 if (statusCode === DisconnectReason.loggedOut) {
-                    sender.send('log', '❌ Sessão expirada/forçada logout. Limpando auth_info...');
+                    sender.send('log', '❌ Sessão expirada/forçada logout. Limpando auth_state...');
                     await clearSession();
                     await stopBot();
                 } else if (statusCode === DisconnectReason.connectionLost || statusCode === DisconnectReason.connectionClosed) {
@@ -389,6 +436,10 @@ async function startBot(sender) {
                 } else if (statusCode === DisconnectReason.restartRequired) {
                     sender.send('log', '🔄 Reinício necessário. Reiniciando bot...');
                     await stopBot();
+                    startBot(sender);
+                } else if (statusCode === 403) {
+                    sender.send('log', '⚠️ Conta banida temporariamente pelo WhatsApp. Aguardando 1 hora...');
+                    await delay(3600000);
                     startBot(sender);
                 } else {
                     if (retryCount < maxRetries) {
@@ -439,9 +490,8 @@ async function stopBot() {
 
 async function clearSession() {
     try {
-        await fs.rm('auth_info', { recursive: true, force: true });
-        const exists = await fs.access('auth_info').then(() => true).catch(() => false);
-        sendLog(`🧹 Sessão limpa com sucesso. Pasta auth_info existe? ${exists}`);
+        await pool.query('DELETE FROM auth_state');
+        sendLog('🧹 Sessão limpa com sucesso.');
     } catch (error) {
         console.error('Erro ao limpar sessão:', error);
         sendLog(`⚠️ Erro ao limpar sessão: ${error.message}`);
@@ -548,14 +598,16 @@ async function carregarContatos(sender) {
 async function enviarMensagens(sock, sender) {
     const monitorResources = () => {
         const used = process.memoryUsage();
+        const cpuUsage = process.cpuUsage();
         const memoryInfo = `Memória: RSS=${(used.rss / 1024 / 1024).toFixed(2)}MB, Heap=${(used.heapUsed / 1024 / 1024).toFixed(2)}MB/${(used.heapTotal / 1024 / 1024).toFixed(2)}MB`;
-        console.log(memoryInfo);
-        sendLog(`📈 ${memoryInfo}`);
+        const cpuInfo = `CPU: User=${(cpuUsage.user / 1000000).toFixed(2)}s, System=${(cpuUsage.system / 1000000).toFixed(2)}s`;
+        console.log(`${memoryInfo}, ${cpuInfo}`);
+        sendLog(`📈 ${memoryInfo}, ${cpuInfo}`);
     };
     setInterval(monitorResources, 60000);
 
     try {
-        await pool.query('SELECT 1'); // Testa conexão com o banco
+        await pool.query('SELECT 1');
         sender.send('log', '✅ Conexão com o banco de dados verificada.');
     } catch (err) {
         console.error('Erro ao verificar conexão com o banco:', err);
@@ -585,6 +637,10 @@ async function enviarMensagens(sock, sender) {
 
     sender.send('log', `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`);
 
+    const mensagensPorHora = 50;
+    let mensagensEnviadasNaHora = 0;
+    let ultimaHora = new Date().getHours();
+
     const contatosOrdenados = [...contatos[hoje]].sort((a, b) => {
         const [_, horaA] = a.monitoringDay.split(' às') || ['00:00'];
         const [__, horaB] = b.monitoringDay.split(' às') || ['00:00'];
@@ -595,6 +651,17 @@ async function enviarMensagens(sock, sender) {
         if (stopSignal) {
             sender.send('log', '⛔ Envio de mensagens interrompido: Bot foi parado.');
             throw stopSignal;
+        }
+
+        const horaAtual = new Date().getHours();
+        if (horaAtual !== ultimaHora) {
+            mensagensEnviadasNaHora = 0;
+            ultimaHora = horaAtual;
+        }
+        if (mensagensEnviadasNaHora >= mensagensPorHora) {
+            sender.send('log', `⏳ Limite de ${mensagensPorHora} mensagens/hora atingido. Aguardando próxima hora...`);
+            await delay(3600000 - (Date.now() % 3600000));
+            mensagensEnviadasNaHora = 0;
         }
 
         if (await isMessageSent(contato.registrationCode, contato.monitoringDay)) {
@@ -623,6 +690,7 @@ async function enviarMensagens(sock, sender) {
             sender.send('log', `📊 Estatísticas do Envio: Total Enviadas: ${totalSent}`);
             sender.send('log', `📊 Estatísticas por Dia - ${hoje.charAt(0).toUpperCase() + hoje.slice(1)}: Total Enviadas: ${statsPorDia[hoje]}`);
             sender.send('log', JSON.stringify({ type: 'agentStats', data: { day: hoje, agents: statsPorAgente[hoje] } }));
+            mensagensEnviadasNaHora++;
         } catch (err) {
             if (err === stopSignal) throw err;
             console.error(`Erro ao enviar mensagem para ${contato.numeroFormatado} (${contato.registrationCode}):`, err);
@@ -630,8 +698,8 @@ async function enviarMensagens(sock, sender) {
             continue;
         }
 
-        sender.send('log', `⏳ Aguardando 40s...`);
-        await delay(40000);
+        sender.send('log', `⏳ Aguardando 60s...`);
+        await delay(60000);
     }
 
     sender.send('log', `📊 Estatísticas Finais: Total Enviadas: ${totalSent}`);
