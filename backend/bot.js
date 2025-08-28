@@ -211,7 +211,17 @@ wss.on('connection', (ws, req) => {
     console.log('Novo cliente WebSocket conectado');
     wssClients.push(ws);
 
-    const pingInterval = setInterval(() => ws.ping(), 30000); // Ping a cada 30s
+    const pingInterval = setInterval(() => {
+        if (ws.isAlive === false) {
+            wssClients = wssClients.filter(client => client !== ws);
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping();
+    }, 30000);
+
+    ws.isAlive = true;
+    ws.on('pong', () => ws.isAlive = true);
     ws.on('close', () => {
         console.log('Cliente WebSocket desconectado');
         wssClients = wssClients.filter(client => client !== ws);
@@ -336,6 +346,7 @@ async function startBot(sender) {
 
         sock.ev.on('connection.update', async (update) => {
             console.log('Conexão atualizada:', JSON.stringify(update, null, 2));
+            sender.send('log', `ℹ️ Conexão atualizada: ${JSON.stringify(update, null, 2)}`);
             const { connection, lastDisconnect, qr, isNewLogin } = update;
 
             if (qr) {
@@ -543,6 +554,15 @@ async function enviarMensagens(sock, sender) {
     };
     setInterval(monitorResources, 60000);
 
+    try {
+        await pool.query('SELECT 1'); // Testa conexão com o banco
+        sender.send('log', '✅ Conexão com o banco de dados verificada.');
+    } catch (err) {
+        console.error('Erro ao verificar conexão com o banco:', err);
+        sender.send('log', `⚠️ Erro ao verificar conexão com o banco: ${err.message}`);
+        throw err;
+    }
+
     const contatos = await carregarContatos(sender);
     const hoje = new Date().toLocaleString('pt-BR', { weekday: 'long' }).toLowerCase().replace('-feira', '').trim();
     sender.send('log', `📅 Hoje é: ${hoje}`);
@@ -590,7 +610,7 @@ async function enviarMensagens(sock, sender) {
         try {
             await Promise.race([
                 sock.sendMessage(numeroWhatsApp, { text: mensagem }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo limite excedido')), 10000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Tempo limite excedido')), 15000))
             ]);
             totalSent++;
             statsPorDia[hoje]++;
