@@ -555,7 +555,7 @@ async function enviarMensagens(sock, sender) {
     setInterval(monitorResources, 60000);
 
     try {
-        await pool.query('SELECT 1'); // Testa conexão com o banco
+        await pool.query('SELECT 1'); 
         sender.send('log', '✅ Conexão com o banco de dados verificada.');
     } catch (err) {
         console.error('Erro ao verificar conexão com o banco:', err);
