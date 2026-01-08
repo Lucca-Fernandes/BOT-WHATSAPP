@@ -10,7 +10,7 @@ function Login() {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const API_URL = 'https://bot-whatsapp-va5n.onrender.com'; 
+    const API_URL = 'http://localhost:5000'; 
 
     const handleSubmit = async (e) => {
         e.preventDefault();

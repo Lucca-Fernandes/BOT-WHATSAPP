@@ -19,7 +19,7 @@ function ContactLogs() {
     const [groupedLogs, setGroupedLogs] = useState({});
     const [selectedAgent, setSelectedAgent] = useState(null);
 
-    const API_URL = 'https://bot-whatsapp-va5n.onrender.com';
+    const API_URL = 'http://localhost:5000';
 
     // Função para buscar os logs da API
     const fetchLogs = async () => {

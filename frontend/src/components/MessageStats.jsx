@@ -41,7 +41,7 @@ function MessageStats() {
 
         const fetchInitialStats = async () => {
             try {
-                const response = await fetch('https://bot-whatsapp-va5n.onrender.com/stats', {
+                const response = await fetch('http://localhost:5000/stats', {
                     method: 'GET',
                     headers: {
                         'x-session-key': sessionKey,
@@ -66,7 +66,7 @@ function MessageStats() {
 
         fetchInitialStats();
 
-        const wsUrl = 'wss://bot-whatsapp-va5n.onrender.com';
+        const wsUrl = 'ws://localhost:5000';
         const ws = new WebSocket(`${wsUrl}?sessionKey=${sessionKey}`);
         wsRef.current = ws;
 
@@ -164,7 +164,7 @@ function MessageStats() {
         }
 
         try {
-            const response = await fetch('https://bot-whatsapp-va5n.onrender.com/reset-stats', {
+            const response = await fetch('http://localhost:5000/reset-stats', {
                 method: 'POST',
                 headers: {
                     'x-session-key': sessionKey,

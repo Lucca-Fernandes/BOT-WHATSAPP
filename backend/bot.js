@@ -460,7 +460,7 @@ function formatarNumeroTelefone(numero) {
     if (corpo.length !== 8) return { numeroFormatado: null, numeroParaEnvio: null };
     const parte1 = corpo.slice(0, 4);
     const parte2 = corpo.slice(4);
-    const numeroFormatado = `+55 ${ddd} ${parte1}-${parte2}`;
+    const numeroFormatado = `+12 ${ddd} ${parte1}-${parte2}`;
     const numeroParaEnvio = numeroFormatado;
     return { numeroFormatado, numeroParaEnvio };
 }

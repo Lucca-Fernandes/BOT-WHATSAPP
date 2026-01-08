@@ -35,8 +35,8 @@ function BotInterface() {
     const logAreaRef = useRef(null);
     const wsRef = useRef(null);
 
-    const API_URL = 'https://bot-whatsapp-va5n.onrender.com';
-    const WS_URL = 'wss://bot-whatsapp-va5n.onrender.com';
+    const API_URL = 'http://localhost:5000';
+    const WS_URL = 'ws://localhost:5000';
 
     const setupAxiosInterceptors = () => {
         axios.interceptors.request.use(
