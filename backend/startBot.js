@@ -86,7 +86,7 @@ async function sendMessages(sock) {
     for (const contact of contacts) {
         const numeroWhatsApp = `${contact.numero}@s.whatsapp.net`;
 
-        const mensagem = `Olá ${contact.nome}! Contamos muito com a ajuda de vocês para responder a está pergunta, qual horário de monitoria obrigatória semanal fica melhor para sua rotina?\n\nTurno manhã 9:00 às 15:00\nTurno tarde 15:00 às 21:00\n\nMesmo que você já possua agendamento pedimos para que nos informe qual turno se encaixa melhor na sua rotina e se possível um horário fixo para realização das monitorias semanais, obrigado!`;
+        const mensagem = `🚨Olá ${contact.nome}!🚨 \nAs inscrições para o Desafio Final já começaram e não recebemos sua inscrição ainda. \nEssa é a etapa que conecta seu projeto a oportunidades reais no mercado.\n📆 Prazo de inscrição até dia 13 de Fevereiro. \nEscolha sua trilha e garanta sua formação agora. \nMais informações no site do Desafio: \n👉 https://desafio-desenvolve-2026.netlify.app/`;
 
         try {
             await sock.sendMessage(numeroWhatsApp, { text: mensagem });
