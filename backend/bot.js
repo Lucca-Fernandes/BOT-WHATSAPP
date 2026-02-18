@@ -71,8 +71,8 @@ pool.connect((err) => {
             if (err) console.error('Erro ao criar tabelas:', err.stack);
         });
     }
-});// Teste de consulta para verificar se a conexão está funcionando
-
+});// Teste de consulta para verificar se 
+//dddfd
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
     initializeContactLogs().catch(err => {
