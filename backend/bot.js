@@ -72,7 +72,7 @@ pool.connect((err) => {
         });
     }
 });
-
+// Verificação de conexão a cada 30 segundos
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
     initializeContactLogs().catch(err => {
