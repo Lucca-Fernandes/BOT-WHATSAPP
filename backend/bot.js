@@ -72,7 +72,7 @@ pool.connect((err) => {
         });
     }
 });// Teste de consulta para verificar se 
-//dddfd
+//
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
     initializeContactLogs().catch(err => {
