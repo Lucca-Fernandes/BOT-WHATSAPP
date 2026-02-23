@@ -72,7 +72,7 @@ pool.connect((err) => {
         });
     }
 });
-// teste um -- 
+
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
     initializeContactLogs().catch(err => {
@@ -88,7 +88,7 @@ const diasSemana = ['segunda', 'terça', 'quarta', 'quinta', 'sexta'];
 const generateSessionKey = () => {
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 };
-
+//teste 2-- 
 const authenticateSession = (req, res, next) => {
     const sessionKey = req.headers['x-session-key'];
     if (!sessionKey || !sessions.has(sessionKey)) {
