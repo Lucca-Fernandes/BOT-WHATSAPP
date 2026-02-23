@@ -72,7 +72,7 @@ pool.connect((err) => {
         });
     }
 });
-// teste 1
+// teste um -- 
 const server = app.listen(port, () => {
     console.log(`Backend rodando na porta ${port}`);
     initializeContactLogs().catch(err => {
